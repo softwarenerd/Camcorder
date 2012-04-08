@@ -7,6 +7,7 @@
 //
 
 #import <UIKit/UIKit.h>
+#import "libkern/OSAtomic.h"
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
 #import "CamcorderDelegate.h"
@@ -17,7 +18,8 @@ static NSString * CamcorderErrorDomain = @"Camcorder";
 // Camcorder error code enumeration.
 enum CamcorderErrorCode
 {
-    CamcorderErrorCodeNoVideoInput = 1001
+    CamcorderErrorCodeNoVideoInput = 1001,
+    CamcorderErrorUnableToStartAssetWriter = 1002
 };
 typedef enum CamcorderErrorCode CamcorderErrorCode;
 
@@ -43,7 +45,10 @@ typedef enum CameraResolution CameraResolution;
 @interface Camcorder : NSObject
 
 // Class initializer.
-- (id)initWithOutputDirectoryURL:(NSURL *)outputDirectoryURL;
+- (id)initWithOutputDirectoryURL:(NSURL *)outputDirectoryURL 
+          startingSequenceNumber:(NSUInteger)startingSequenceNumber
+                cameraResolution:(CameraResolution)cameraResolution
+                    captureAudio:(BOOL)captureAudio;
 
 // Gets or sets the delegate.
 @property (nonatomic, assign) id <CamcorderDelegate> delegate;
@@ -81,8 +86,8 @@ typedef enum CameraResolution CameraResolution;
 // Stops recording.
 - (void)stopRecording;
 
-// Performs an auto focus at the specified point. The focus mode will automatically
-// change to locked once the auto focus is complete.
+// Performs an auto focus at the specified point. The focus mode will
+//automatically change to locked once the auto focus is complete.
 - (void)autoFocusAtPoint:(CGPoint)point;
 
 // Switch to continuous auto focus mode at the specified point

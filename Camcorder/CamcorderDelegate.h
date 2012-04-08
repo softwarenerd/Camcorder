@@ -15,25 +15,25 @@
 @protocol CamcorderDelegate <NSObject>
 @required
 
-// Camcorder turned on.
-- (void)camcorderTurnedOn:(Camcorder *)camcorder;
+// Notifies the delegate that the camcorder did turn on.
+- (void)camcorderDidTurnOn:(Camcorder *)camcorder;
 
-// Camcorder turned off.
-- (void)camcorderTurnedOff:(Camcorder *)camcorder;
+// Notifies the delegate that the camcorder did turn off.
+- (void)camcorderDidTurnOff:(Camcorder *)camcorder;
 
-// Camcorder started recording.
-- (void)camcorderStartedRecording:(Camcorder *)camcorder;
+// Notifies the delegate that the camcorder did start recording.
+- (void)camcorderDidStartRecording:(Camcorder *)camcorder;
 
-// Camcorder finished recording.
+// Notifies the delegate that the camcorder did finish recording.
 - (void)camcorderFinishedRecording:(Camcorder *)camcorder videoFilePath:(NSString *)videoFilePath;
 
-// Current recording elapsed time interval.
+// Notifies the delegate of the recording elapsed time interval.
 - (void)camcorder:(Camcorder *)camcorder recordingElapsedTimeInterval:(NSTimeInterval)recordingElapsedTimeInterval;
 
-// Camcorder device configuration changed.
+// Notifies the delegate that the camcorder device configuration changed.
 - (void)camcorderDeviceConfigurationChanged:(Camcorder *)camcorder;
 
-// Camcorder failed with an error.
+// Notifies the delegate that the camcorder failed with an error.
 - (void)camcorder:(Camcorder *)camcorder didFailWithError:(NSError *)error;
 
 @end

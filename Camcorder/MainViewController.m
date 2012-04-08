@@ -8,6 +8,8 @@
 
 #import "MainViewController.h"
 #import "Camcorder.h"
+#import <MobileCoreServices/MobileCoreServices.h>
+#import <AssetsLibrary/AssetsLibrary.h>
 
 // MainViewController (VideoCameraDelegate) interface.
 @interface MainViewController (CamcorderDelegate) <CamcorderDelegate>
@@ -67,7 +69,10 @@
         
     // Allocate and initialize the camcorder.
     NSURL * outputDirectoryURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
-    camcorder_ = [[Camcorder alloc] initWithOutputDirectoryURL:outputDirectoryURL];
+    camcorder_ = [[Camcorder alloc] initWithOutputDirectoryURL:outputDirectoryURL
+                                        startingSequenceNumber:100
+                                              cameraResolution:CameraResolution1920x1080
+                                                  captureAudio:NO];
     [camcorder_ setDelegate:(id <CamcorderDelegate>)self];
     [camcorder_ setCameraPosition:CameraPositionBack];
     
@@ -167,43 +172,41 @@
 // MainViewController (CamcorderDelegate) implementation.
 @implementation MainViewController (CamcorderDelegate)
 
-// Camcorder turned on.
-- (void)camcorderTurnedOn:(Camcorder *)camcorder
+// Notifies the delegate that the camcorder did turn on.
+- (void)camcorderDidTurnOn:(Camcorder *)camcorder
 {
-    [self videoCameraTurnedOn];
+    [self videoCameraTurnedOn];    
 }
 
-// Camcorder turned off.
-- (void)camcorderTurnedOff:(Camcorder *)camcorder
+// Notifies the delegate that the camcorder did turn off.
+- (void)camcorderDidTurnOff:(Camcorder *)camcorder
 {
-    [self videoCameraTurnedOff];
+    [self videoCameraTurnedOff];    
 }
 
-// Camcorder started recording.
-- (void)camcorderStartedRecording:(Camcorder *)camcorder
+// Notifies the delegate that the camcorder did start recording.
+- (void)camcorderDidStartRecording:(Camcorder *)camcorder
 {
 }
 
-// Camcorder finished recording.
+// Notifies the delegate that the camcorder did finish recording.
 - (void)camcorderFinishedRecording:(Camcorder *)camcorder videoFilePath:(NSString *)videoFilePath
 {
 }
 
-// Current recording elapsed time interval.
+// Notifies the delegate of the recording elapsed time interval.
 - (void)camcorder:(Camcorder *)camcorder recordingElapsedTimeInterval:(NSTimeInterval)recordingElapsedTimeInterval
 {
 }
 
-// Camcorder device configuration changed.
+// Notifies the delegate that the camcorder device configuration changed.
 - (void)camcorderDeviceConfigurationChanged:(Camcorder *)camcorder
-{
-    NSLog(@"camcorderDeviceConfigurationChanged");
+{    
 }
 
-// Camcorder failed with an error.
+// Notifies the delegate that the camcorder failed with an error.
 - (void)camcorder:(Camcorder *)camcorder didFailWithError:(NSError *)error
 {
-    NSLog(@"Error %@", [error description]);
 }
 
 @end
@@ -234,6 +237,7 @@
 // Called when the video camera is turned on.
 - (void)videoCameraTurnedOn
 {
+    // If this is not the main thread, perform this selector on the main thread and return.
     if (![NSThread isMainThread])
     {
         [self performSelectorOnMainThread:@selector(videoCameraTurnedOn) withObject:nil waitUntilDone:NO];
@@ -248,6 +252,7 @@
 // Called when the video camera is turned off.
 - (void)videoCameraTurnedOff
 {
+    // If this is not the main thread, perform this selector on the main thread and return.
     if (![NSThread isMainThread])
     {
         [self performSelectorOnMainThread:@selector(videoCameraTurnedOff) withObject:nil waitUntilDone:NO];

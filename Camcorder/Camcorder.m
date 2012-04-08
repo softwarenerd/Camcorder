@@ -8,23 +8,12 @@
 
 #import "libkern/OSAtomic.h"
 #import <MobileCoreServices/UTCoreTypes.h>
-#import <AssetsLibrary/AssetsLibrary.h>
 #import <ImageIO/CGImageProperties.h>
+#import "AtomicFlag.h"
 #import "Camcorder.h"
 
-// Camcorder (AVCaptureVideoDataOutputSampleBufferDelegate) interface.
-@interface Camcorder (AVCaptureVideoDataOutputSampleBufferDelegate) <AVCaptureVideoDataOutputSampleBufferDelegate>
-@end
-
-// Camcorder (AVCaptureFileOutputRecordingDelegate) interface.
-@interface Camcorder (AVCaptureFileOutputRecordingDelegate) <AVCaptureFileOutputRecordingDelegate>
-
-// Informs the delegate when the output has started writing to a file.
-- (void)captureOutput:(AVCaptureFileOutput *)captureOutput didStartRecordingToOutputFileAtURL:(NSURL *)fileURL fromConnections:(NSArray *)connections;
-
-// 	Informs the delegate when all pending data has been written to an output file.
-- (void)captureOutput:(AVCaptureFileOutput *)captureOutput didFinishRecordingToOutputFileAtURL:(NSURL *)outputFileURL fromConnections:(NSArray *)connections error:(NSError *)error;
-
+// Camcorder (AVCaptureAudioVideoDataOutputSampleBufferDelegate) interface.
+@interface Camcorder (AVCaptureAudioVideoDataOutputSampleBufferDelegate) <AVCaptureAudioDataOutputSampleBufferDelegate, AVCaptureVideoDataOutputSampleBufferDelegate>
 @end
 
 // Camcorder (Internal) interface.
@@ -42,6 +31,10 @@
 
 // Starts recording with an optional time interval.
 - (void)doStartRecording:(NSTimeInterval *)timeInterval;
+
+- (BOOL)setupAssetWriterAudioInput:(CMFormatDescriptionRef)currentFormatDescription;
+
+- (BOOL)setupAssetWriterVideoInput:(CMFormatDescriptionRef)currentFormatDescription;
 
 // AVCaptureDeviceWasConnectedNotification observer callback.
 - (void)captureDeviceWasConnectedNotification:(NSNotification *)notification;
@@ -64,47 +57,87 @@
     // The output directory URL. 
     NSURL * outputDirectoryURL_;
     
+    // The sequence number.
+    NSUInteger sequenceNumber_;
+    
+    // The camera resolution.
+    CameraResolution cameraResolution_;
+    
+    // A value which indicates whether to capture audio.
+    BOOL captureAudio_;
+    
     // A value which indicates whether the video camera is on.
-    volatile BOOL isOn_;
+    AtomicFlag * atomicFlagIsOn_;
     
     // A value which indicates whether the video camera is recording.
-    volatile BOOL isRecording_;
+    AtomicFlag * atomicFlagIsRecording_;
     
-    // The capture session.
+    // The capture session. All video and audio inputs and outputs are
+    // connected to the capture session.
     AVCaptureSession * captureSession_;
     
-    // The capture video preview layer.
+    // The capture video preview layer that displays a preview of the
+    // capture session. This is a singleton instance which is created
+    // the first time it is asked for.
     AVCaptureVideoPreviewLayer * captureVideoPreviewLayer_;
 
-    // The video capture device input.
+    // The capture device input for video.
     AVCaptureDeviceInput * captureDeviceInputVideo_;
     
-    // The audio capture device input.
+    // The capture device input for audio.
     AVCaptureDeviceInput * captureDeviceInputAudio_;
     
-    dispatch_queue_t videoCaptureQueue_;
-    dispatch_queue_t movieWritingQueue_;
-    
+    // The capture video data output. Delivers video buffers to our 
+    // AVCaptureVideoDataOutputSampleBufferDelegate implementation.
     AVCaptureVideoDataOutput * captureVideoDataOutput_;
     
+    // The capture audio data output. Delivers audio buffers to our 
+    // AVCaptureVideoDataOutputSampleBufferDelegate implementation.
+    AVCaptureAudioDataOutput * captureAudioDataOutput_;
+
+    // The capture video data output queue. This queue is used by the
+    // capture video data output above to deliver video buffers to our
+    // AVCaptureVideoDataOutputSampleBufferDelegate implementation.
+    dispatch_queue_t captureVideoDataOutputQueue_;
+    
+    // The capture audio data output queue. This queue is used by the
+    // capture audi data output above to deliver audio buffers to our
+    // AVCaptureAudioDataOutputSampleBufferDelegate implementation.
+    dispatch_queue_t captureAudioDataOutputQueue_;
+
+    // The asset writer queue.
+    dispatch_queue_t assetWriterQueue_;
+    
+    // The video connection.
     AVCaptureConnection * videoConnection_;
     
+    // The audio connection.
+    AVCaptureConnection * audioConnection_;
+
+    // The asset writer that writes the movie file.
     AVAssetWriter * assetWriter_;
     
     AVAssetWriterInput * assetWriterVideoIn_;
+    AVAssetWriterInput * assetWriterAudioIn_;
     
     // Auto off timer.
     NSTimer * autoOffTimer_;
     
     // The timer used to fire videoCamera:recordingElapsedTimeInterval: callbacks to the VideoCameraDelegate.
     NSTimer * recordingTimer_;
+
+    volatile BOOL readyToRecordVideo;
+    volatile BOOL readyToRecordAudio;
 }
 
 // Gets or sets the delegate.
 @synthesize delegate = delegate_;
 
 // Class initializer.
-- (id)initWithOutputDirectoryURL:(NSURL *)outputDirectoryURL
+- (id)initWithOutputDirectoryURL:(NSURL *)outputDirectoryURL 
+          startingSequenceNumber:(NSUInteger)startingSequenceNumber
+                cameraResolution:(CameraResolution)cameraResolution
+                    captureAudio:(BOOL)captureAudio
 {
     // Initialize superclass.
     self = [super init];
@@ -115,27 +148,63 @@
         return nil;
     }
     
-    // Set the output directory URL.
+    // Initialize.
     outputDirectoryURL_ = outputDirectoryURL;
+    sequenceNumber_ = startingSequenceNumber;
+    cameraResolution_ = cameraResolution;
+    captureAudio_ = captureAudio;
+    atomicFlagIsOn_ = [[AtomicFlag alloc] init];
+    atomicFlagIsRecording_ = [[AtomicFlag alloc] init];
     
     // Create capture session.
     captureSession_ = [[AVCaptureSession alloc] init];
-    [captureSession_ setSessionPreset:AVCaptureSessionPreset1920x1080];
+    
+    // Set the capture session preset.
+    switch (cameraResolution_)
+    {
+        case CameraResolution1920x1080:
+            [captureSession_ setSessionPreset:AVCaptureSessionPreset1920x1080];
+            break;
+            
+        case CameraResolution1280x720:
+            [captureSession_ setSessionPreset:AVCaptureSessionPreset1280x720];
+            break;
+
+        case CameraResolution960x540:
+            [captureSession_ setSessionPreset:AVCaptureSessionPresetiFrame960x540];
+            break;
+
+        default:
+            captureSession_ = nil;
+            @throw [NSException exceptionWithName:NSInvalidArgumentException
+                                           reason:@"cameraPosition of CameraPositionNone may not be set."
+                                         userInfo:nil];
+    }
     
     // Create and add the capture video data output to the capture session.
     captureVideoDataOutput_ = [[AVCaptureVideoDataOutput alloc] init];
 	[captureVideoDataOutput_ setAlwaysDiscardsLateVideoFrames:YES];
-	videoCaptureQueue_ = dispatch_queue_create("co.directr.videocap", DISPATCH_QUEUE_SERIAL);
-	[captureVideoDataOutput_ setSampleBufferDelegate:(id<AVCaptureVideoDataOutputSampleBufferDelegate>)self queue:videoCaptureQueue_];
+	captureVideoDataOutputQueue_ = dispatch_queue_create("co.directr.capv", DISPATCH_QUEUE_SERIAL);
+	[captureVideoDataOutput_ setSampleBufferDelegate:self
+                                               queue:captureVideoDataOutputQueue_];
     if ([captureSession_ canAddOutput:captureVideoDataOutput_])
     {
 		[captureSession_ addOutput:captureVideoDataOutput_];
 	}
 
+    // If we're supposed to capture audio, create and add the capture audio data output to the capture session
+    if (captureAudio_)
+    {
+        captureAudioDataOutput_ = [[AVCaptureAudioDataOutput alloc] init];
+        captureAudioDataOutputQueue_ = dispatch_queue_create("co.directr.capa", DISPATCH_QUEUE_SERIAL);
+        [captureAudioDataOutput_ setSampleBufferDelegate:self
+                                                   queue:captureAudioDataOutputQueue_];
+        if ([captureSession_ canAddOutput:captureAudioDataOutput_])
+        {
+            [captureSession_ addOutput:captureAudioDataOutput_];
+        }
+    }
     
-    // Create serial queue for movie writing
-	movieWritingQueue_ = dispatch_queue_create("co.directr.movewrite", DISPATCH_QUEUE_SERIAL);
-
     // Get the default notification center.
     NSNotificationCenter * notificationCenter = [NSNotificationCenter defaultCenter];
     
@@ -194,7 +263,9 @@
 
         // In theory we can't get here.
         default:
-            @throw [NSException exceptionWithName:NSInternalInconsistencyException reason:@"Unsupported capture device position." userInfo:nil];
+            @throw [NSException exceptionWithName:NSInternalInconsistencyException
+                                           reason:@"Unsupported capture device position."
+                                         userInfo:nil];
     }    
 }
 
@@ -204,17 +275,9 @@
     // Set camera position to CameraPositionNone.
     if (cameraPosition == CameraPositionNone)
     {
-        // If we have a video capture device input, remove it.
-        if (captureDeviceInputVideo_)
-        {
-            [captureSession_ beginConfiguration];
-            [captureSession_ removeInput:captureDeviceInputVideo_];
-            [captureSession_ commitConfiguration];
-            captureDeviceInputVideo_ = nil;
-        }
-        
-        // Done.
-        return;
+        @throw [NSException exceptionWithName:NSInvalidArgumentException
+                                       reason:@"cameraPosition of CameraPositionNone may not be set."
+                                     userInfo:nil];
     }
     
     // Select the capture device position.
@@ -229,7 +292,10 @@
     }
     else
     {
-        @throw [NSException exceptionWithName:NSInternalInconsistencyException reason:@"Unsupported camera position." userInfo:nil];
+        // Can't get here unless a new entry is added to the enum and this code 
+        @throw [NSException exceptionWithName:NSInternalInconsistencyException
+                                       reason:@"Unsupported camera position."
+                                     userInfo:nil];
     }
     
     // If we have a video capture device input and its position is what it is supposed to be, return. 
@@ -271,13 +337,13 @@
 // Gets a value indicating whether the video camera is on.
 - (BOOL)isOn
 {
-    return isOn_;
+    return [atomicFlagIsOn_ isSet];
 }
 
 // Gets a value indicating whether the video camera is recording.
 - (BOOL)isRecording
 {
-    return isRecording_;
+    return [atomicFlagIsRecording_ isSet];
 }
 
 // Returns a AVCaptureVideoPreviewLayer for the video camera.
@@ -295,48 +361,50 @@
 // Turns the video camera on.
 - (void)turnOn
 {
-    // Turn the video camera on, if it's off.
-    if (!isOn_)
-    {        
-        // Set the flag.
-        isOn_ = YES;
-        
-        // Start the session. This is done asychronously since -startRunning doesn't return until the
-        // session is running.
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
-                       ^{
-                           // Start the capture session.
-                           [captureSession_ startRunning];
-                           
-                           // Inform the delegate.
-                           [[self delegate] camcorderTurnedOn:self];
-                       });
+    // If the camera is on, return.
+    if (![atomicFlagIsOn_ trySet])
+    {
+        return;
     }
+    
+    // The block that turns the camera on.
+    void (^turnCamcorderOnBlock)() = ^
+    {
+        // Start the capture session.
+        [captureSession_ startRunning];
+        
+        // Inform the delegate.
+        [[self delegate] camcorderDidTurnOn:self];        
+    };
+        
+    // Start the session asychronously.
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), turnCamcorderOnBlock);
 }
 
 // Turns the video camera off.
 - (void)turnOff
 {
-    // Turn the video camera off, if it's on.
-    if (isOn_)
+    // If the camera is off, return.
+    if ([atomicFlagIsOn_ tryClear])
     {
-        // Stops the auto off timer.
-        [self stopAutoOffTimer];
-        
-        // Stop the session. This is done asychronously since -stopRunning doesn't return until the
-        // session is running.
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
-                       ^{
-                           // Stop the capture session.
-                           [captureSession_ stopRunning];
-                           
-                           // Clear the flag.
-                           isOn_ = NO;
-                           
-                           // Inform the delegate that the camera has turned off.
-                           [[self delegate] camcorderTurnedOff:self];
-                       });
+        return;
     }
+
+    // Stops the auto off timer.
+    [self stopAutoOffTimer];
+        
+    // The block that turns the camera off.
+    void (^turnCamcorderOffBlock)() = ^
+    {
+        // Stop the capture session.
+        [captureSession_ stopRunning];
+        
+        // Inform the delegate.
+        [[self delegate] camcorderDidTurnOff:self];
+    };
+
+    // Stop the session asychronously.
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), turnCamcorderOffBlock);
 }
 
 // Starts the auto off timer.
@@ -383,12 +451,16 @@
 // Stops recording.
 - (void)stopRecording
 {
-    // Set the recording flag.
-    isRecording_ = NO;
+    // Try to stop recording.
+    if (![atomicFlagIsRecording_ tryClear])
+    {
+        return;
+    }
     
     if ([assetWriter_ finishWriting])
     {
-        assetWriterVideoIn_ = nil;
+        assetWriterVideoIn_ = nil;        
+        assetWriterAudioIn_ = nil;
         assetWriter_ = nil;
     }
     
@@ -439,67 +511,122 @@
 
 @end
 
-// Camcorder (AVCaptureVideoDataOutputSampleBufferDelegate) implementation.
-@implementation Camcorder (AVCaptureVideoDataOutputSampleBufferDelegate)
+// Camcorder (AVCaptureAudioVideoDataOutputSampleBufferDelegate) implementation.
+@implementation Camcorder (AVCaptureAudioVideoDataOutputSampleBufferDelegate)
 
 - (void) writeSampleBuffer:(CMSampleBufferRef)sampleBuffer ofType:(NSString *)mediaType
 {
-	if ([assetWriter_ status] == AVAssetWriterStatusUnknown)
+	if ( assetWriter_.status == AVAssetWriterStatusUnknown )
     {
         if ([assetWriter_ startWriting])
         {			
 			[assetWriter_ startSessionAtSourceTime:CMSampleBufferGetPresentationTimeStamp(sampleBuffer)];
 		}
-		else
-        {
-			NSLog(@"Fucker!");
+		else {
+            NSLog(@"Fuck1");
+			//[self showError:[assetWriter_ error]];
 		}
 	}
 	
-	if ([assetWriter_ status] == AVAssetWriterStatusWriting )
-    {
-		if (mediaType == AVMediaTypeVideo)
-        {
-			if ([assetWriterVideoIn_ isReadyForMoreMediaData])
-            {
-				if (![assetWriterVideoIn_ appendSampleBuffer:sampleBuffer])
-                {
-                    NSLog(@"Fucker!");
+	if ( assetWriter_.status == AVAssetWriterStatusWriting ) {
+		
+		if (mediaType == AVMediaTypeVideo) {
+			if (assetWriterVideoIn_.readyForMoreMediaData) {
+				if (![assetWriterVideoIn_ appendSampleBuffer:sampleBuffer]) {
+                    NSLog(@"Fuck2");
+					//[self showError:[assetWriter_ error]];
+				}
+			}
+		}
+		else if (mediaType == AVMediaTypeAudio) {
+			if (assetWriterAudioIn_.readyForMoreMediaData) {
+				if (![assetWriterAudioIn_ appendSampleBuffer:sampleBuffer]) {
+                    NSLog(@"Fuck3");
+					//[self showError:[assetWriter_ error]];
 				}
 			}
 		}
 	}
 }
 
-// Called whenever an AVCaptureVideoDataOutput instance outputs a new video frame.
-- (void)captureOutput:(AVCaptureOutput *)captureOutput didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection
+// Called whenever an AVCaptureVideoDataOutput or AVCaptureAudioDataOutput instance has data.
+- (void)captureOutput:(AVCaptureOutput *)captureOutput
+didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
+       fromConnection:(AVCaptureConnection *)connection
 {
-	CMFormatDescriptionRef formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer);
-    
-    void (^work)() = ^
+    // Ignore data when not recording.
+    if ([atomicFlagIsRecording_ isClear])
     {
-        CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(formatDescription);
+        return;
+    }
+    
+    // Get the format description.
+    CMFormatDescriptionRef formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer);
 
-        //NSLog(@"Fuck! %i, %i %@", dimensions.width, dimensions.height, isRecording_ ? @"Recording" : @"Not recording");
-		if (assetWriter_)
+    // Process sample buffer block.
+    void (^processSampleBufferBlock)() = ^
+    {
+        // Enter writing mode, if we're not in writing mode.
+        if ([assetWriter_ status] == AVAssetWriterStatusUnknown)
         {
-            if (isRecording_)
+            if ([assetWriter_ startWriting])
             {
-                if (connection == videoConnection_)
+                [assetWriter_ startSessionAtSourceTime:CMSampleBufferGetPresentationTimeStamp(sampleBuffer)];
+            }
+            else
+            {
+                NSLog(@"Fuck!");
+                CFRelease(formatDescription);
+                CFRelease(sampleBuffer);
+                NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorUnableToStartAssetWriter userInfo:nil];
+                [[self delegate] camcorder:self didFailWithError:error];
+                [self stopRecording];
+                return;
+            }
+        }
+
+        // If we're in writing mode, write.
+        if ([assetWriter_ status] == AVAssetWriterStatusWriting)
+        {
+            if (connection == videoConnection_)
+            {
+                if ([assetWriterVideoIn_ isReadyForMoreMediaData])
                 {
-                    [self writeSampleBuffer:sampleBuffer ofType:AVMediaTypeVideo];
+                    if (![assetWriterVideoIn_ appendSampleBuffer:sampleBuffer])
+                    {
+                        NSLog(@"Unable to write video buffer!");
+                    }
                 }
             }
+            else if (connection == audioConnection_)
+            {
+#if false
+                if (!assetWriterAudioIn_)
+                {
+                    [self setupAssetWriterAudioInput:formatDescription];
+                }
+                
+
+                if ([assetWriterAudioIn_ isReadyForMoreMediaData])
+                {
+                    if (![assetWriterAudioIn_ appendSampleBuffer:sampleBuffer])
+                    {
+                        NSLog(@"Unable to write audio buffer!");
+                    }
+                }
+#endif
+            }        
 		}
 
-		CFRelease(sampleBuffer);
+        // Done.
 		CFRelease(formatDescription);
+		CFRelease(sampleBuffer);
     };
-
     
+    // Dispatch the processing of the sample buffer to the asset writer queue.
     CFRetain(sampleBuffer);
-	CFRetain(formatDescription);
-	dispatch_async(movieWritingQueue_, work);
+    CFRetain(formatDescription);
+	dispatch_async(assetWriterQueue_, processSampleBufferBlock);
 }
 
 @end
@@ -558,6 +685,12 @@
     // Stop the auto off timer.
     [self stopAutoOffTimer];
         
+    videoConnection_ = [captureVideoDataOutput_ connectionWithMediaType:AVMediaTypeVideo];
+    if (captureAudio_)
+    {
+        audioConnection_ = [captureVideoDataOutput_ connectionWithMediaType:AVMediaTypeAudio];
+    }
+    
 #if false
     // Start the recording timer that emits videoCamera:recordingElapsedTimeInterval: calls to
     // the delegate.
@@ -569,51 +702,41 @@
 #endif
     
     // Format the clip name.
-    NSString * clipName = [NSString stringWithFormat:@"Movie.mov"];
+    NSString * clipName = [NSString stringWithFormat:@"Camcorder%i.mp4", sequenceNumber_++];
     
     // Set clip URL.
     NSURL * clipURL = [outputDirectoryURL_ URLByAppendingPathComponent:clipName];
     
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *filePath = [clipURL path];
-    if ([fileManager fileExistsAtPath:filePath]) {
-        NSError *error;
-        [fileManager removeItemAtPath:filePath error:&error];
-    }
-
+    // Create the asset writer queue.
+	assetWriterQueue_ = dispatch_queue_create("co.directr.assetwriterqueue", DISPATCH_QUEUE_SERIAL);
+    
     // Create an asset writer
     NSError * error;
-    AVAssetWriter * assetWriter = [[AVAssetWriter alloc] initWithURL:clipURL fileType:(NSString *)kUTTypeMPEG4 error:&error];
+    assetWriter_ = [[AVAssetWriter alloc] initWithURL:clipURL fileType:(NSString *)kUTTypeMPEG4 error:&error];
     if (error)
     {
     }
     
-    //AVCaptureSessionPreset1920x1080
-	int numPixels = 1920 * 1080;
-    CGFloat bitsPerPixel = 11.4;
-    int bitsPerSecond = numPixels * bitsPerPixel;
-    NSLog(@"BPS %i", bitsPerSecond);
-    	
+    NSDictionary * compressionProperties = [NSDictionary dictionaryWithObjectsAndKeys:
+                                            [NSNumber numberWithInteger:30], AVVideoMaxKeyFrameIntervalKey,
+                                            nil];
+    
 	NSDictionary * videoCompressionSettings = [NSDictionary dictionaryWithObjectsAndKeys:
                                                AVVideoCodecH264, AVVideoCodecKey,
                                                [NSNumber numberWithInteger:1920], AVVideoWidthKey,
                                                [NSNumber numberWithInteger:1080], AVVideoHeightKey,
-                                               [NSDictionary dictionaryWithObjectsAndKeys:
-											   //[NSNumber numberWithInteger:bitsPerSecond], AVVideoAverageBitRateKey,
-											   [NSNumber numberWithInteger:30], AVVideoMaxKeyFrameIntervalKey,
-											   nil], AVVideoCompressionPropertiesKey,
-											  nil];
-	AVAssetWriterInput * assetWriterVideoIn;
-    if ([assetWriter canApplyOutputSettings:videoCompressionSettings forMediaType:AVMediaTypeVideo])
+                                               compressionProperties, AVVideoCompressionPropertiesKey,
+                                               nil];
+    
+	if ([assetWriter_ canApplyOutputSettings:videoCompressionSettings forMediaType:AVMediaTypeVideo]) 
     {
-		assetWriterVideoIn = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:videoCompressionSettings];
-		[assetWriterVideoIn setExpectsMediaDataInRealTime:YES];
-		//[assetWriterVideoIn setTransform:[self transformFromCurrentVideoOrientationToOrientation:self.referenceOrientation]];
-		if ([assetWriter canAddInput:assetWriterVideoIn])
+		assetWriterVideoIn_ = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:videoCompressionSettings];
+		[assetWriterVideoIn_ setExpectsMediaDataInRealTime:YES];
+		if ([assetWriter_ canAddInput:assetWriterVideoIn_])
         {
-			[assetWriter addInput:assetWriterVideoIn];
-        }
-		else
+			[assetWriter_ addInput:assetWriterVideoIn_];
+		}
+        else
         {
 			NSLog(@"Couldn't add asset writer video input.");
             return;
@@ -625,13 +748,87 @@
         return;
 	}
 
-    videoConnection_ = [captureVideoDataOutput_ connectionWithMediaType:AVMediaTypeVideo];
 
-    assetWriter_ = assetWriter;
-    assetWriterVideoIn_ = assetWriterVideoIn;
-   
     // Set the recording flag.
-    isRecording_ = YES;    
+    [atomicFlagIsRecording_ trySet];
+}
+
+- (BOOL)setupAssetWriterAudioInput:(CMFormatDescriptionRef)currentFormatDescription
+{
+	const AudioStreamBasicDescription *currentASBD = CMAudioFormatDescriptionGetStreamBasicDescription(currentFormatDescription);
+    
+	size_t aclSize = 0;
+	const AudioChannelLayout * currentChannelLayout = CMAudioFormatDescriptionGetChannelLayout(currentFormatDescription, &aclSize);
+	NSData * currentChannelLayoutData = nil;
+	    
+	// AVChannelLayoutKey must be specified, but if we don't know any better give an empty data and let AVAssetWriter decide.
+	if (currentChannelLayout && aclSize > 0)
+		currentChannelLayoutData = [NSData dataWithBytes:currentChannelLayout length:aclSize];
+	else
+		currentChannelLayoutData = [NSData data];
+	
+	NSDictionary *audioCompressionSettings = [NSDictionary dictionaryWithObjectsAndKeys:
+											  [NSNumber numberWithInteger:kAudioFormatMPEG4AAC], AVFormatIDKey,
+											  [NSNumber numberWithFloat:currentASBD->mSampleRate], AVSampleRateKey,
+											  [NSNumber numberWithInt:64000], AVEncoderBitRatePerChannelKey,
+											  [NSNumber numberWithInteger:currentASBD->mChannelsPerFrame], AVNumberOfChannelsKey,
+											  currentChannelLayoutData, AVChannelLayoutKey,
+											  nil];
+	if ([assetWriter_ canApplyOutputSettings:audioCompressionSettings forMediaType:AVMediaTypeAudio]) {
+		assetWriterAudioIn_ = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeAudio outputSettings:audioCompressionSettings];
+		assetWriterAudioIn_.expectsMediaDataInRealTime = YES;
+		if ([assetWriter_ canAddInput:assetWriterAudioIn_])
+			[assetWriter_ addInput:assetWriterAudioIn_];
+		else {
+			NSLog(@"Couldn't add asset writer audio input.");
+            return NO;
+		}
+	}
+	else {
+		NSLog(@"Couldn't apply audio output settings.");
+        return NO;
+	}
+    
+    return YES;
+}
+
+- (BOOL)setupAssetWriterVideoInput:(CMFormatDescriptionRef)currentFormatDescription 
+{
+	CMVideoDimensions videoDimensions = CMVideoFormatDescriptionGetDimensions(currentFormatDescription);
+		
+    NSDictionary * compressionProperties = [NSDictionary dictionaryWithObjectsAndKeys:
+                                            [NSNumber numberWithInteger:30], AVVideoMaxKeyFrameIntervalKey,
+                                            nil];
+    
+	NSDictionary * videoCompressionSettings = [NSDictionary dictionaryWithObjectsAndKeys:
+                                               AVVideoCodecH264, AVVideoCodecKey,
+                                               [NSNumber numberWithInteger:videoDimensions.width], AVVideoWidthKey,
+                                               [NSNumber numberWithInteger:videoDimensions.height], AVVideoHeightKey,
+                                               compressionProperties, AVVideoCompressionPropertiesKey,
+                                               nil];
+
+	if ([assetWriter_ canApplyOutputSettings:videoCompressionSettings forMediaType:AVMediaTypeVideo]) 
+    {
+		assetWriterVideoIn_ = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:videoCompressionSettings];
+		[assetWriterVideoIn_ setExpectsMediaDataInRealTime:YES];
+		if ([assetWriter_ canAddInput:assetWriterVideoIn_])
+        {
+			[assetWriter_ addInput:assetWriterVideoIn_];
+		}
+        else
+        {
+			NSLog(@"Couldn't add asset writer video input.");
+            return NO;
+		}
+	}
+	else
+    {
+		NSLog(@"Couldn't apply video output settings.");
+        return NO;
+	}
+    
+
+    return YES;
 }
 
 // AVCaptureDeviceWasConnectedNotification observer callback.
@@ -708,7 +905,7 @@
 - (void)autoOffTimerCallback:(NSTimer *)timer
 {
     // If we're not recording, turn the video camera off.
-    if (!isRecording_)
+    if ([atomicFlagIsRecording_ isClear])
     {
         NSLog(@"Auto-off.");
         [self turnOff];
