@@ -70,9 +70,9 @@
     // Allocate and initialize the camcorder.
     NSURL * outputDirectoryURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
     camcorder_ = [[Camcorder alloc] initWithOutputDirectoryURL:outputDirectoryURL
-                                        startingSequenceNumber:100
-                                              cameraResolution:CameraResolution1920x1080
-                                                  captureAudio:NO];
+                                                         width:1920
+                                                        height:1080
+                                                  captureAudio:YES];
     [camcorder_ setDelegate:(id <CamcorderDelegate>)self];
     [camcorder_ setCameraPosition:CameraPositionBack];
     

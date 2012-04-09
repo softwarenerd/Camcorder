@@ -19,7 +19,8 @@ static NSString * CamcorderErrorDomain = @"Camcorder";
 enum CamcorderErrorCode
 {
     CamcorderErrorCodeNoVideoInput = 1001,
-    CamcorderErrorUnableToStartAssetWriter = 1002
+    CamcorderErrorUnableToAddAssetWriterVideoInput = 1002,
+    CamcorderErrorUnableToStartAssetWriter = 1003
 };
 typedef enum CamcorderErrorCode CamcorderErrorCode;
 
@@ -45,9 +46,9 @@ typedef enum CameraResolution CameraResolution;
 @interface Camcorder : NSObject
 
 // Class initializer.
-- (id)initWithOutputDirectoryURL:(NSURL *)outputDirectoryURL 
-          startingSequenceNumber:(NSUInteger)startingSequenceNumber
-                cameraResolution:(CameraResolution)cameraResolution
+- (id)initWithOutputDirectoryURL:(NSURL *)outputDirectoryURL
+                           width:(NSUInteger)width
+                          height:(NSUInteger)height
                     captureAudio:(BOOL)captureAudio;
 
 // Gets or sets the delegate.
@@ -80,8 +81,8 @@ typedef enum CameraResolution CameraResolution;
 // Starts recording.
 - (void)startRecording;
 
-// Starts recording with a time interval.
-- (void)startRecordingWithTimeInterval:(NSTimeInterval)timeInterval;
+// Starts recording with an optional time interval.
+- (void)startRecordingWithTimeInterval:(NSTimeInterval *)timeInterval;
 
 // Stops recording.
 - (void)stopRecording;
