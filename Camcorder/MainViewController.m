@@ -30,8 +30,14 @@
 // buttonOnOffTouchUpInside action.
 - (void)buttonOnOffTouchUpInside:(UIButton *)sender;
 
-// buttonCameraTouchUpInside action.
-- (void)buttonCameraTouchUpInside:(UIButton *)sender;
+// buttonRecordTouchUpInside action.
+- (void)buttonRecordTouchUpInside:(UIButton *)sender;
+
+// buttonFrontCameraTouchUpInside action.
+- (void)buttonFrontCameraTouchUpInside:(UIButton *)sender;
+
+// buttonBackCameraTouchUpInside action.
+- (void)buttonBackCameraTouchUpInside:(UIButton *)sender;
 
 @end
 
@@ -51,14 +57,17 @@
     // The video preview layer which is added to the video preview view.
     AVCaptureVideoPreviewLayer *  captureVideoPreviewLayer_;
 
-    // The camera button.
-    UIButton * buttonCamera_;
-
     // The camera on/off button.
     UIButton * buttonOnOff_;
 
     // The camera record button.
     UIButton * buttonRecord_;
+
+    // The front camera button.
+    UIButton * buttonFrontCamera_;
+
+    // The back camera button.
+    UIButton * buttonBackCamera_;
 }
 
 // Called after the controller’s view is loaded into memory.
@@ -74,6 +83,7 @@
                                                         height:1080
                                                   captureAudio:YES];
     [camcorder_ setDelegate:(id <CamcorderDelegate>)self];
+    [camcorder_ start];
     [camcorder_ setCameraPosition:CameraPositionBack];
     
     // Allocate, initialize, and add the view preview view.
@@ -110,29 +120,39 @@
     [buttonOnOff_ setTitleColor:[UIColor grayColor] forState:UIControlStateDisabled];
     [buttonOnOff_ setTitle:@"Camera On / Off" forState:UIControlStateNormal];
     [buttonOnOff_ addTarget:self action:@selector(buttonOnOffTouchUpInside:) forControlEvents:UIControlEventTouchUpInside];
-    [buttonOnOff_ setAutoresizingMask:UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin];
+    [buttonOnOff_ setAutoresizingMask:UIViewAutoresizingFlexibleTopMargin];
     [[self view] addSubview:buttonOnOff_];
     
-    // Allocate, initialize, and add the camera button.
-    buttonCamera_ = [UIButton buttonWithType:UIButtonTypeRoundedRect];
-    [buttonCamera_ setFrame:CGRectMake(165.0, 400.0, 145.0, 35.0)];
-    [[buttonCamera_ titleLabel] setFont:font];
-    [buttonCamera_ setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
-    [buttonCamera_ setTitle:@"Camera Position" forState:UIControlStateNormal];
-    [buttonCamera_ addTarget:self action:@selector(buttonCameraTouchUpInside:) forControlEvents:UIControlEventTouchUpInside];
-    [buttonCamera_ setAutoresizingMask:UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin];
-    [[self view] addSubview:buttonCamera_];
-
     // Allocate, initialize, and add the record button.
     buttonRecord_ = [UIButton buttonWithType:UIButtonTypeRoundedRect];
-    [buttonRecord_ setFrame:CGRectMake(10.0, 445.0, 145.0, 35.0)];
+    [buttonRecord_ setFrame:CGRectMake(165.0, 400, 145.0, 35.0)];
     [[buttonRecord_ titleLabel] setFont:font];
     [buttonRecord_ setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
     [buttonRecord_ setTitleColor:[UIColor grayColor] forState:UIControlStateDisabled];
     [buttonRecord_ setTitle:@"Record" forState:UIControlStateNormal];
     [buttonRecord_ addTarget:self action:@selector(buttonRecordTouchUpInside:) forControlEvents:UIControlEventTouchUpInside];
-    [buttonRecord_ setAutoresizingMask:UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin];
+    [buttonRecord_ setAutoresizingMask:UIViewAutoresizingFlexibleTopMargin];
     [[self view] addSubview:buttonRecord_];
+
+    // Allocate, initialize, and add the front camera button.
+    buttonFrontCamera_ = [UIButton buttonWithType:UIButtonTypeRoundedRect];
+    [buttonFrontCamera_ setFrame:CGRectMake(10.0, 445.0, 145.0, 35.0)];
+    [[buttonFrontCamera_ titleLabel] setFont:font];
+    [buttonFrontCamera_ setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+    [buttonFrontCamera_ setTitle:@"Front Position" forState:UIControlStateNormal];
+    [buttonFrontCamera_ addTarget:self action:@selector(buttonFrontCameraTouchUpInside:) forControlEvents:UIControlEventTouchUpInside];
+    [buttonFrontCamera_ setAutoresizingMask:UIViewAutoresizingFlexibleTopMargin];
+    [[self view] addSubview:buttonFrontCamera_];
+
+    // Allocate, initialize, and add the back camera button.
+    buttonBackCamera_ = [UIButton buttonWithType:UIButtonTypeRoundedRect];
+    [buttonBackCamera_ setFrame:CGRectMake(165.0, 445.0, 145.0, 35.0)];
+    [[buttonBackCamera_ titleLabel] setFont:font];
+    [buttonBackCamera_ setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+    [buttonBackCamera_ setTitle:@"Back Position" forState:UIControlStateNormal];
+    [buttonBackCamera_ addTarget:self action:@selector(buttonBackCameraTouchUpInside:) forControlEvents:UIControlEventTouchUpInside];
+    [buttonBackCamera_ setAutoresizingMask:UIViewAutoresizingFlexibleTopMargin];
+    [[self view] addSubview:buttonBackCamera_];
 
     // Update the status.
     [self updateStatus];
@@ -207,6 +227,7 @@
 // Notifies the delegate that the camcorder failed with an error.
 - (void)camcorder:(Camcorder *)camcorder didFailWithError:(NSError *)error
 {
+    NSLog(@"Camcorder error %i", [error code]);
 }
 
 @end
@@ -217,21 +238,7 @@
 // Update the status.
 - (void)updateStatus
 {
-    NSString * cameraPosition;
-    if ([camcorder_ cameraPosition] == CameraPositionNone)
-    {
-        cameraPosition = @"No Camera";
-    }
-    else if ([camcorder_ cameraPosition] == CameraPositionBack)
-    {
-        cameraPosition = @"Back Camera";
-    }
-    else if ([camcorder_ cameraPosition] == CameraPositionFront)
-    {
-        cameraPosition = @"Front Camera";
-    }
-    
-    [labelStatus_ setText:[NSString stringWithFormat:@"%@ is %@", cameraPosition, [camcorder_ isOn] ? @"ON" : @"OFF"]];
+    //[labelStatus_ setText:[NSString stringWithFormat:@"%@ is %@", cameraPosition, [camcorder_ isOn] ? @"ON" : @"OFF"]];
 }
 
 // Called when the video camera is turned on.
@@ -266,20 +273,7 @@
 
 // buttonOnOffTouchUpInside action.
 - (void)buttonOnOffTouchUpInside:(UIButton *)sender
-{
-    if ([camcorder_ cameraPosition] == CameraPositionNone)
-    {
-        UIAlertView *alertView = [[UIAlertView alloc] 
-                                  initWithTitle:@"Error" 
-                                  message:@"No camera is selected." 
-                                  delegate:self 
-                                  cancelButtonTitle:@"OK" 
-                                  otherButtonTitles:nil, 
-                                  nil];
-        [alertView show];
-        return;
-    }
-        
+{        
     if (![camcorder_ isOn])
     {
         [camcorder_ turnOn];
@@ -292,20 +286,22 @@
     [buttonOnOff_ setEnabled:NO];
 }
 
-// buttonCameraTouchUpInside action.
-- (void)buttonCameraTouchUpInside:(UIButton *)sender
+// buttonFrontCameraTouchUpInside action.
+- (void)buttonFrontCameraTouchUpInside:(UIButton *)sender
 {
-    if ([camcorder_ cameraPosition] == CameraPositionBack)
-    {
-        [camcorder_ setCameraPosition:CameraPositionFront];
-    }
-    else if ([camcorder_ cameraPosition] == CameraPositionFront)
-    {
-        [camcorder_ setCameraPosition:CameraPositionBack];
-    }
+    [camcorder_ setCameraPosition:CameraPositionFront];
     
     [self updateStatus];
 }
+
+// buttonBackCameraTouchUpInside action.
+- (void)buttonBackCameraTouchUpInside:(UIButton *)sender
+{
+    [camcorder_ setCameraPosition:CameraPositionBack];
+    
+    [self updateStatus];
+}
+
 
 // buttonRecordTouchUpInside action.
 - (void)buttonRecordTouchUpInside:(UIButton *)sender

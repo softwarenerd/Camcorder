@@ -13,6 +13,9 @@
 #import "Camcorder.h"
 #import "MovieWriter.h"
 
+// Local defines.
+#define OUTPUT_QUEUE "camcorder.output"
+
 // Camcorder (AVCaptureAudioVideoDataOutputSampleBufferDelegate) interface.
 @interface Camcorder (AVCaptureAudioVideoDataOutputSampleBufferDelegate) <AVCaptureAudioDataOutputSampleBufferDelegate, AVCaptureVideoDataOutputSampleBufferDelegate>
 @end
@@ -48,7 +51,7 @@
 @implementation Camcorder
 {
 @private
-    // The output directory URL. 
+    // The output directory URL.
     NSURL * outputDirectoryURL_;
     
     // The width.
@@ -60,10 +63,13 @@
     // A value which indicates whether to capture audio.
     BOOL captureAudio_;
     
-    // A value which indicates whether the video camera is on.
+    // A value which indicates whether the camcorder has been started.
+    AtomicFlag * atomicFlagStarted_;
+    
+    // A value which indicates whether the camcorder is on.
     AtomicFlag * atomicFlagIsOn_;
     
-    // A value which indicates whether the video camera is recording.
+    // A value which indicates whether the camcorder is recording.
     AtomicFlag * atomicFlagIsRecording_;
     
     // The capture session. All video and audio inputs and outputs are
@@ -89,16 +95,9 @@
     // AVCaptureVideoDataOutputSampleBufferDelegate implementation.
     AVCaptureAudioDataOutput * captureAudioDataOutput_;
 
-    // The capture video data output queue. This queue is used by the
-    // capture video data output above to deliver video buffers to our
-    // AVCaptureVideoDataOutputSampleBufferDelegate implementation.
-    dispatch_queue_t captureVideoDataOutputQueue_;
-    
-    // The capture audio data output queue. This queue is used by the
-    // capture audi data output above to deliver audio buffers to our
-    // AVCaptureAudioDataOutputSampleBufferDelegate implementation.
-    dispatch_queue_t captureAudioDataOutputQueue_;
-   
+    // The capture output queue.
+    dispatch_queue_t captureOutputQueue_;
+       
     // Auto off timer.
     NSTimer * autoOffTimer_;
     
@@ -120,7 +119,7 @@
 {
     // Initialize superclass.
     self = [super init];
-    
+        
     // Handle errors.
     if (!self)
     {
@@ -132,80 +131,13 @@
     width_ = width;
     height_ = height;
     captureAudio_ = captureAudio;
+    atomicFlagStarted_ = [[AtomicFlag alloc] init];
     atomicFlagIsOn_ = [[AtomicFlag alloc] init];
     atomicFlagIsRecording_ = [[AtomicFlag alloc] init];
-    
-    // Create capture session.
-    captureSession_ = [[AVCaptureSession alloc] init];
-    
-    if (width_ == 1920 && height_ == 1080)
-    {
-        [captureSession_ setSessionPreset:AVCaptureSessionPreset1920x1080];        
-    }
-    else if (width_ == 1280 && height_ == 720)
-    {
-        [captureSession_ setSessionPreset:AVCaptureSessionPreset1280x720]; //iFrame? What's the difference?
-    }
-    else if (width_ == 960 && height_ == 540)
-    {
-        [captureSession_ setSessionPreset:AVCaptureSessionPresetiFrame960x540];
-    }
-    else if (width_ == 640 && height_ == 480)
-    {
-        [captureSession_ setSessionPreset:AVCaptureSessionPreset640x480];
-    }
-    else if (width_ == 352 && height_ == 288)
-    {
-        [captureSession_ setSessionPreset:AVCaptureSessionPreset352x288];        
-    }
-    else
-    {
-        captureSession_ = nil;
-        @throw [NSException exceptionWithName:NSInvalidArgumentException
-                                       reason:@"Unsupported width / height."
-                                     userInfo:nil];
-    }
-    
-    // Create and add the capture video data output to the capture session.
-    captureVideoDataOutput_ = [[AVCaptureVideoDataOutput alloc] init];
-	[captureVideoDataOutput_ setAlwaysDiscardsLateVideoFrames:YES];
-	captureVideoDataOutputQueue_ = dispatch_queue_create("camcorder.video", DISPATCH_QUEUE_SERIAL);
-	[captureVideoDataOutput_ setSampleBufferDelegate:self
-                                               queue:captureVideoDataOutputQueue_];
-    if ([captureSession_ canAddOutput:captureVideoDataOutput_])
-    {
-		[captureSession_ addOutput:captureVideoDataOutput_];
-	}
-
-    // If we're supposed to capture audio, create and add the capture audio data output to the capture session
-    if (captureAudio_)
-    {
-        // Add new video capture device input.
-        NSError * error;
-        AVCaptureDeviceInput * captureDeviceInputAudio = [[AVCaptureDeviceInput alloc] initWithDevice:[self audioDevice] error:&error];
-        if (error)
-        {
-            NSLog(@"Kaboom");
-        }
-        else
-        {
-            if ([captureSession_ canAddInput:captureDeviceInputAudio])
-            {
-                [captureSession_ addInput:captureDeviceInputAudio];
-                captureDeviceInputAudio_ = captureDeviceInputAudio;
-            }
-        }
         
-        captureAudioDataOutput_ = [[AVCaptureAudioDataOutput alloc] init];
-        captureAudioDataOutputQueue_ = dispatch_queue_create("camcorder.audio", DISPATCH_QUEUE_SERIAL);
-        [captureAudioDataOutput_ setSampleBufferDelegate:self
-                                                   queue:captureAudioDataOutputQueue_];
-        if ([captureSession_ canAddOutput:captureAudioDataOutput_])
-        {
-            [captureSession_ addOutput:captureAudioDataOutput_];
-        }
-    }
-    
+    // Create the output queue.
+    captureOutputQueue_ = dispatch_queue_create(OUTPUT_QUEUE, DISPATCH_QUEUE_SERIAL);
+
     // Get the default notification center.
     NSNotificationCenter * notificationCenter = [NSNotificationCenter defaultCenter];
     
@@ -228,12 +160,8 @@
 // Dealloc.
 - (void)dealloc
 {
-    // Release our queues.
-    dispatch_release(captureVideoDataOutputQueue_);    
-    if (captureAudio_)
-    {
-        dispatch_release(captureAudioDataOutputQueue_);
-    }
+    // Release the capture output queue.
+    dispatch_release(captureOutputQueue_);    
     
     // Get the default notification center.
     NSNotificationCenter * notificationCenter = [NSNotificationCenter defaultCenter];
@@ -249,45 +177,79 @@
                                 object:nil];
 }
 
-// Gets the camera position.
-- (CameraPosition)cameraPosition
+- (BOOL)start
 {
-    // If there is no video capture device input, return CameraPositionNone.
-    if (!captureDeviceInputVideo_)
+    // If the delegate has not been set, return NO.
+    if (!delegate_)
     {
-        return CameraPositionNone;
+        return NO;
     }
     
-    // Process the video capture device input position.
-    switch ([[captureDeviceInputVideo_ device] position])
+    // Create capture session. Set it to HD video.
+    captureSession_ = [[AVCaptureSession alloc] init];
+    //[captureSession_ setSessionPreset:AVCaptureSessionPresetHigh];        
+
+    // Create the capture video data output.
+    captureVideoDataOutput_ = [[AVCaptureVideoDataOutput alloc] init];
+	[captureVideoDataOutput_ setAlwaysDiscardsLateVideoFrames:NO];
+	[captureVideoDataOutput_ setSampleBufferDelegate:self queue:captureOutputQueue_];
+
+    // If we can't add the video output, report the failure 
+    if (![captureSession_ canAddOutput:captureVideoDataOutput_])
     {
-        // Back.
-        case AVCaptureDevicePositionBack:
-            return CameraPositionBack;
+        NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorStartVideoOutput userInfo:nil];
+        [[self delegate] camcorder:self didFailWithError:error];
+        return false;
+    }
+    
+    // Add the video output.
+    [captureSession_ addOutput:captureVideoDataOutput_];
+    
+    // Initialize audio capture.
+    if (captureAudio_)
+    {
+        // Add new audio capture device input.
+        NSError * error;
+        AVCaptureDeviceInput * captureDeviceInputAudio = [[AVCaptureDeviceInput alloc] initWithDevice:[self audioDevice] error:&error];
+        if (error)
+        {
+            [[self delegate] camcorder:self didFailWithError:error];
+            return false;
+        }
+        
+        // If we can't add the audio input, report the failure.
+        if (![captureSession_ canAddInput:captureDeviceInputAudio])
+        {
+            captureDeviceInputAudio_ = captureDeviceInputAudio;
+            return NO;
+        }
+        
+        // Add the audio input.
+        [captureSession_ addInput:captureDeviceInputAudio];
 
-        // Front.
-        case AVCaptureDevicePositionFront:
-            return CameraPositionFront;
+        // Create the capture audio data output.
+        captureAudioDataOutput_ = [[AVCaptureAudioDataOutput alloc] init];
+        [captureAudioDataOutput_ setSampleBufferDelegate:self queue:captureOutputQueue_];
+        
+        // If we can't add the audio output, report the failure 
+        if (![captureSession_ canAddOutput:captureAudioDataOutput_])
+        {
+            NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorStartAudioOutput userInfo:nil];
+            [[self delegate] camcorder:self didFailWithError:error];
+            return false;
+        }
 
-        // In theory we can't get here.
-        default:
-            @throw [NSException exceptionWithName:NSInternalInconsistencyException
-                                           reason:@"Unsupported capture device position."
-                                         userInfo:nil];
+        // Add the audio output.
+        [captureSession_ addOutput:captureAudioDataOutput_];
     }    
+    
+    // Success.
+    return YES;
 }
 
 // Sets the camera position.
 - (void)setCameraPosition:(CameraPosition)cameraPosition
 {
-    // Set camera position to CameraPositionNone.
-    if (cameraPosition == CameraPositionNone)
-    {
-        @throw [NSException exceptionWithName:NSInvalidArgumentException
-                                       reason:@"cameraPosition of CameraPositionNone may not be set."
-                                     userInfo:nil];
-    }
-    
     // Select the capture device position.
     AVCaptureDevicePosition captureDevicePosition;
     if (cameraPosition == CameraPositionBack)
@@ -300,7 +262,7 @@
     }
     else
     {
-        // Can't get here unless a new entry is added to the enum and this code 
+        // Can't get here unless a new entry is added to the enum and this code isn't updated.
         @throw [NSException exceptionWithName:NSInternalInconsistencyException
                                        reason:@"Unsupported camera position."
                                      userInfo:nil];
@@ -342,31 +304,32 @@
     [captureSession_ commitConfiguration];
 }
 
-// Gets a value indicating whether the video camera is on.
+// Gets a value indicating whether the camcorder is on.
 - (BOOL)isOn
 {
     return [atomicFlagIsOn_ isSet];
 }
 
-// Gets a value indicating whether the video camera is recording.
+// Gets a value indicating whether the camcorder is recording.
 - (BOOL)isRecording
 {
     return [atomicFlagIsRecording_ isSet];
 }
 
-// Returns a AVCaptureVideoPreviewLayer for the video camera.
+// Returns a AVCaptureVideoPreviewLayer for the camcorder.
 - (AVCaptureVideoPreviewLayer *)captureVideoPreviewLayer
 {
-    // Allocate the 
+    // Allocate the capture video preview layer, if it hasn't already been allocated.
     if (!captureVideoPreviewLayer_)
     {
         captureVideoPreviewLayer_ = [[AVCaptureVideoPreviewLayer alloc] initWithSession:captureSession_];
     }
     
+    // Return the capture video preview layer.
     return captureVideoPreviewLayer_;
 }
 
-// Turns the video camera on.
+// Turns the camcorder on.
 - (void)turnOn
 {
     // If the camera is on, return.
@@ -389,7 +352,7 @@
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), turnCamcorderOnBlock);
 }
 
-// Turns the video camera off.
+// Turns the camcorder off.
 - (void)turnOff
 {
     // If the camera is off, return.
@@ -456,10 +419,11 @@
     {
         // Stop the auto off timer.
         [self stopAutoOffTimer];
-     
+             
         // Allocate and initialize the movie output.
         movieWriter_ = [[MovieWriter alloc] initWithOutputDirectoryURL:outputDirectoryURL_ width:width_ height:height_ audio:captureAudio_];
         [movieWriter_ begin];
+        
 #if false
         // Start the recording timer that emits videoCamera:recordingElapsedTimeInterval: calls to
         // the delegate.
@@ -482,6 +446,7 @@
     }
     
     [movieWriter_ end];
+    movieWriter_ = nil;
         
     // Start the auto off timer.
     [self startAutoOffTimer];
@@ -675,7 +640,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 // Auto off timer callback.
 - (void)autoOffTimerCallback:(NSTimer *)timer
 {
-    // If we're not recording, turn the video camera off.
+    // If we're not recording, turn the camcorder off.
     if ([atomicFlagIsRecording_ isClear])
     {
         NSLog(@"Auto-off.");

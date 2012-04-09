@@ -8,6 +8,7 @@
 
 #import "MovieWriter.h"
 #import "libkern/OSAtomic.h"
+#import <AssetsLibrary/AssetsLibrary.h>
 #import <MobileCoreServices/UTCoreTypes.h>
 #import <ImageIO/CGImageProperties.h>
 #import "AtomicFlag.h"
@@ -20,6 +21,9 @@
         
     // The output directory URL. 
     NSURL * outputDirectoryURL_;
+    
+    // The video file URL.
+    NSURL * videoFileURL_;
     
     // Width.
     NSUInteger width_;
@@ -72,6 +76,11 @@
     return self;
 }
 
+- (void)dealloc
+{
+    NSLog(@"DEALLOC MovieWriter");
+}
+
 // Begins the movie writer.
 - (BOOL)begin
 {
@@ -83,15 +92,35 @@
     NSString * videoFileName = [NSString stringWithFormat:@"Camcorder-%@.mp4", [dateFormat stringFromDate:[[NSDate alloc] init]]];
     
     // Set video file URL.
-    NSURL * videoFileURL = [outputDirectoryURL_ URLByAppendingPathComponent:videoFileName];
+    videoFileURL_ = [outputDirectoryURL_ URLByAppendingPathComponent:videoFileName];
        
     // Create the asset writer
     NSError * error;
-    assetWriter_ = [[AVAssetWriter alloc] initWithURL:videoFileURL fileType:(NSString *)kUTTypeMPEG4 error:&error];
+    assetWriter_ = [[AVAssetWriter alloc] initWithURL:videoFileURL_ fileType:(NSString *)kUTTypeMPEG4 error:&error];
     if (error)
     {
         error_ = error;
         return NO;
+    }
+    
+    // Adjust for orientation.
+    UIDeviceOrientation deviceOrientation = [[UIDevice currentDevice] orientation];
+    CGAffineTransform affineTransform;
+    if (UIDeviceOrientationIsPortrait(deviceOrientation))
+    {
+        affineTransform = CGAffineTransformMakeRotation(0.0);
+    }
+    else if (deviceOrientation == UIDeviceOrientationLandscapeLeft)
+    {
+        NSLog(@"UIDeviceOrientationLandscapeLeft");
+        //affineTransform = CGAffineTransformMakeRotation(-M_PI_2);
+        affineTransform = CGAffineTransformMakeRotation(0.0);
+    }
+    else if (deviceOrientation == UIDeviceOrientationLandscapeRight)
+    {
+        NSLog(@"UIDeviceOrientationLandscapeRight");
+        affineTransform = CGAffineTransformMakeRotation(M_PI);
+        //affineTransform = CGAffineTransformMakeRotation(M_PI_2);
     }
     
     // Create the compression properties.
@@ -110,14 +139,17 @@
     // See if the asset writer can apply the output settings.
 	if (![assetWriter_ canApplyOutputSettings:outputSettings forMediaType:AVMediaTypeVideo])
     {
+        NSLog(@"assetWriter could not apply output settings");
         return NO;
     }
     
     // Allocate and initialize the asset writer video input.
     assetWriterVideoInput_ = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:outputSettings];
-    [assetWriterVideoInput_ setExpectsMediaDataInRealTime:YES];
+    [assetWriterVideoInput_ setTransform:affineTransform];
+    [assetWriterVideoInput_ setExpectsMediaDataInRealTime:YES];    
     if (![assetWriter_ canAddInput:assetWriterVideoInput_])
     {
+        NSLog(@"assetWriter could not add asset writer for video.");
         return NO;
     }
 
@@ -167,6 +199,14 @@
 - (BOOL)end
 {
     [assetWriter_ finishWriting];
+
+    ALAssetsLibrary * library = [[ALAssetsLibrary alloc] init];
+    [library writeVideoAtPathToSavedPhotosAlbum:videoFileURL_
+                                completionBlock:^(NSURL *assetURL, NSError *error) {
+                                   
+                                }];
+    
+    dispatch_release(assetWriterQueue_);
     return YES;
 }
 

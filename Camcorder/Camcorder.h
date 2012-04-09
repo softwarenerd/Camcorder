@@ -18,29 +18,23 @@ static NSString * CamcorderErrorDomain = @"Camcorder";
 // Camcorder error code enumeration.
 enum CamcorderErrorCode
 {
-    CamcorderErrorCodeNoVideoInput = 1001,
-    CamcorderErrorUnableToAddAssetWriterVideoInput = 1002,
-    CamcorderErrorUnableToStartAssetWriter = 1003
+    CamcorderErrorNoStarted = 1000,
+    CamcorderErrorStartVideoOutput = 1001,
+    CamcorderErrorStartAudioOutput = 1002,
+
+    CamcorderErrorCodeNoVideoInput = 1010,
+    CamcorderErrorUnableToAddAssetWriterVideoInput = 1004,
+    CamcorderErrorUnableToStartAssetWriter = 1008
 };
 typedef enum CamcorderErrorCode CamcorderErrorCode;
 
 // The camera position enumeration.
 enum CameraPosition
 {
-    CameraPositionNone = 0,
     CameraPositionFront = 1,
     CameraPositionBack = 2
 };
 typedef enum CameraPosition CameraPosition;
-
-// The camera resolution enumeration.
-enum CameraResolution
-{
-    CameraResolution1920x1080 = 1,
-    CameraResolution1280x720 = 2,
-    CameraResolution960x540 = 3
-};
-typedef enum CameraResolution CameraResolution;
 
 // Camcorder interface.
 @interface Camcorder : NSObject
@@ -54,22 +48,24 @@ typedef enum CameraResolution CameraResolution;
 // Gets or sets the delegate.
 @property (nonatomic, assign) id <CamcorderDelegate> delegate;
 
-// Gets or sets the camera position.
-@property (nonatomic, assign) CameraPosition cameraPosition;
-
-// Gets a value indicating whether the video camera is on.
+// Gets a value indicating whether the camcorder is on.
 @property (nonatomic, readonly) BOOL isOn;
 
-// Gets a value indicating whether the video camera is recording.
+// Gets a value indicating whether the camcorder is recording.
 @property (nonatomic, readonly) BOOL isRecording;
 
-// Returns a AVCaptureVideoPreviewLayer for the video camera.
+// Returns a AVCaptureVideoPreviewLayer for the camcorder.
 - (AVCaptureVideoPreviewLayer *)captureVideoPreviewLayer;
 
-// Turns the video camera on.
+- (BOOL)start;
+
+// Sets the camera position.
+- (void)setCameraPosition:(CameraPosition)cameraPosition;
+
+// Turns the camcorder on.
 - (void)turnOn;
 
-// Turns the video camera off.
+// Turns the camcorder off.
 - (void)turnOff;
 
 // Starts the auto off timer.
