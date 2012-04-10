@@ -94,12 +94,12 @@
     // The capture output queue.
     dispatch_queue_t captureOutputQueue_;
               
+    // The asset writer queue.
+    dispatch_queue_t assetWriterQueue_;
+
     // A value which indicate whether the asset writer session has been started.
     AtomicFlag * atomicFlagAssetWriterSessionStarted_;
     
-    // The asset writer queue.
-    dispatch_queue_t assetWriterQueue_;
-       
     // The asset writer that writes the movie file.
     AVAssetWriter * assetWriter_;
     
