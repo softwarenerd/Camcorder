@@ -43,6 +43,9 @@ typedef enum CamcorderErrorCode CamcorderErrorCode;
 // Gets a value indicating whether the camcorder is recording.
 @property (nonatomic, readonly) BOOL isRecording;
 
+// Gets a value indicating whether the camcorder is recording.
+@property (nonatomic, readonly) NSTimeInterval recordingElapsedTimeInterval;
+
 // Asynchronously turns the camcorder on. If the camcorder is on, it is turned off then on.
 - (void)asynchronouslyTurnOnWithCaptureDevicePosition:(AVCaptureDevicePosition)captureDevicePosition
                                             audio:(BOOL)audio;

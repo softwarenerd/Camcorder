@@ -52,9 +52,6 @@
 // Stops recording.
 - (void)stopRecording;
 
-// Recording timer callback.
-- (void)recordingTimerCallback:(NSTimer *)timer;
-
 @end
 
 // Camcorder implementation.
@@ -96,24 +93,13 @@
 
     // The capture output queue.
     dispatch_queue_t captureOutputQueue_;
-           
-    // The timer used to fire videoCamera:recordingElapsedTimeInterval: callbacks to the VideoCameraDelegate.
-    NSTimer * recordingTimer_;
-
-    // The video file URL.
-    NSURL * videoFileURL_;
-    
+              
     // A value which indicate whether the asset writer session has been started.
     AtomicFlag * atomicFlagAssetWriterSessionStarted_;
     
     // The asset writer queue.
     dispatch_queue_t assetWriterQueue_;
-    
-    //
-    volatile int outstandingAssetWriterQueueOperations_;
-    
-    CMTime startTime_;
-    
+       
     // The asset writer that writes the movie file.
     AVAssetWriter * assetWriter_;
     
@@ -122,6 +108,18 @@
     
     // The asset writer audio input.
     AVAssetWriterInput * assetWriterAudioInput_;
+    
+    // The video file URL.
+    NSURL * videoFileURL_;
+
+    // The recording time interval. A value of 0.0 means untimed.
+    NSTimeInterval recordingTimeInterval_;
+
+    // The recording start time.
+    CMTime assetWriterStartTime_;
+    
+    // The elapsed time interval.
+    NSTimeInterval recordingElapsedTimeInterval_;
 }
 
 // Class initializer.
@@ -187,6 +185,12 @@
 - (BOOL)isRecording
 {
     return [atomicFlagIsRecording_ isSet];
+}
+
+// Gets a value indicating whether the camcorder is recording.
+- (NSTimeInterval)recordingElapsedTimeInterval
+{
+    return recordingElapsedTimeInterval_;
 }
 
 // Asynchronously turns the camcorder on. If the camcorder is on, it is turned off then on.
@@ -318,78 +322,71 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
        fromConnection:(AVCaptureConnection *)connection
 {
     // Ignore data when not recording.
-    if ([atomicFlagIsRecording_ isSet])
+    if ([atomicFlagIsRecording_ isClear])
     {
-        if (captureOutput == captureAudioDataOutput_)
+        return;
+    }
+    
+    // Process sample buffer block.
+    void (^processSampleBufferBlock)() = ^
+    {
+        // Ignore samples after we stop recording.
+        if ([atomicFlagIsRecording_ isClear])
         {
-            // Process sample buffer block.
-            void (^processSampleBufferBlock)() = ^
-            {
-                CMTime timeStamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+            return;
+        }
+        
+        // Get the sample timestamp.
+        CMTime timeStamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+        
+        // If this is the first sample buffer, start the asset writer session.
+        if ([atomicFlagAssetWriterSessionStarted_ trySet])
+        {
+            assetWriterStartTime_ = timeStamp;
+            [assetWriter_ startSessionAtSourceTime:assetWriterStartTime_];
+        }
+        
+        // Calculate the elapsed time interval.
+        NSTimeInterval elapsedTimeInterval = CMTimeGetSeconds(CMTimeSubtract(timeStamp, assetWriterStartTime_));
 
-                if ([atomicFlagAssetWriterSessionStarted_ trySet])
-                {
-                    startTime_ = timeStamp;
-                    [assetWriter_ startSessionAtSourceTime:startTime_];
-                }
-                
-                if ([assetWriter_ status] == AVAssetWriterStatusWriting && [assetWriterAudioInput_ isReadyForMoreMediaData])
-                {
-                    if (![assetWriterAudioInput_ appendSampleBuffer:sampleBuffer])
-                    {
-                        NSLog(@"Unable to write audio buffer!");
-                    }
-                }
-                
-                // Done.
-                CFRelease(sampleBuffer);
-                OSAtomicDecrement32(&outstandingAssetWriterQueueOperations_);
-            };
-            
-            // Retain prior to dispatch.
-            CFRetain(sampleBuffer);
-            
-            // Dispatch the processing of the sample buffer to the asset writer queue.
-            OSAtomicIncrement32(&outstandingAssetWriterQueueOperations_);
-            dispatch_async(assetWriterQueue_, processSampleBufferBlock);
-        }
-        else if (captureOutput == captureVideoDataOutput_)
+        // If we're writing, write.
+        if ([assetWriter_ status] == AVAssetWriterStatusWriting)
         {
-            // Process sample buffer block.
-            void (^processSampleBufferBlock)() = ^
+            if (captureOutput == captureAudioDataOutput_)
             {
-                CMTime timeStamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
-                if ([atomicFlagAssetWriterSessionStarted_ trySet])
+                if ([assetWriterAudioInput_ isReadyForMoreMediaData])
                 {
-                    startTime_ = timeStamp;
-                    [assetWriter_ startSessionAtSourceTime:startTime_];
+                    [assetWriterAudioInput_ appendSampleBuffer:sampleBuffer];
+                }
+            }
+            else if (captureOutput == captureVideoDataOutput_)
+            {
+                if ([assetWriterVideoInput_ isReadyForMoreMediaData])
+                {
+                    [assetWriterVideoInput_ appendSampleBuffer:sampleBuffer];
                 }
                 
-                if ([assetWriter_ status] == AVAssetWriterStatusWriting && [assetWriterVideoInput_ isReadyForMoreMediaData])
+                // End timed recording.
+                if (recordingTimeInterval_ != 0.0 && elapsedTimeInterval >= recordingTimeInterval_)
                 {
-                    if (![assetWriterVideoInput_ appendSampleBuffer:sampleBuffer])
-                    {
-                        NSLog(@"Unable to write video buffer!");
-                    }
+                    elapsedTimeInterval = recordingTimeInterval_;
+                    [self stopRecording];
                 }
-                
-                CMTime elapsedTime = CMTimeSubtract(timeStamp, startTime_);
-                NSLog(@"Elapsed video %f", CMTimeGetSeconds(elapsedTime));
-                [self stopRecording];
-                
-                // Done.
-                CFRelease(sampleBuffer);
-                OSAtomicDecrement32(&outstandingAssetWriterQueueOperations_);
-            };
-            
-            // Retain prior to dispatch.
-            CFRetain(sampleBuffer);
-            
-            // Dispatch the processing of the sample buffer to the asset writer queue.
-            OSAtomicIncrement32(&outstandingAssetWriterQueueOperations_);
-            dispatch_async(assetWriterQueue_, processSampleBufferBlock);
+            }
         }
-    }    
+        
+        // Update the elapsed time interval.
+        recordingElapsedTimeInterval_ = elapsedTimeInterval;
+
+        // Done.
+        CFRelease(sampleBuffer);
+    };
+    
+    // Retain prior to dispatch.
+    CFRetain(sampleBuffer);
+    
+    // Dispatch the processing of the sample buffer to the asset writer queue.
+    dispatch_async(assetWriterQueue_, processSampleBufferBlock);                
 }
 
 @end
@@ -561,6 +558,8 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         return;
     }
         
+    [self stopRecording];
+    
     // Stop the capture session.
     [captureSession_ stopRunning];
     
@@ -733,13 +732,14 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     }
 
     // Set-up context.
+    recordingTimeInterval_ = timeInterval;
     assetWriter_ = assetWriter;
     assetWriterAudioInput_ = assetWriterAudioInput;
     assetWriterVideoInput_ = assetWriterVideoInput;
 
     // Set the recording flag.
     [atomicFlagIsRecording_ trySet];
-    
+        
     // Inform the delegate.
     [[self delegate] camcorderDidStartRecording:self];
 }
@@ -755,16 +755,15 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     
     // Stop recording.
     [atomicFlagIsRecording_ tryClear];
-
-    // Wait for outstanding operations to complete.
-    while (!OSAtomicCompareAndSwap32(0, 0, &outstandingAssetWriterQueueOperations_))
-    {
-        NSLog(@"Waiting for %i operations", outstandingAssetWriterQueueOperations_);
-        [NSThread sleepForTimeInterval:0.1];
-    }
     
     // Finish writing.
     [assetWriter_ finishWriting];
+    
+    // Inform the delegate.
+    if (recordingTimeInterval_ != 0.0)
+    {
+        recordingElapsedTimeInterval_ = recordingTimeInterval_;
+    }
 
     // Clear context.
     assetWriter_ = nil;
@@ -780,15 +779,10 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
                                 }];
     
     // Inform the delegate.
-    [[self delegate] camcorderDidStopRecording:self videoFilePath:[videoFileURL_ path]];
+    [[self delegate] camcorderDidStopRecording:self
+                  recordingElapsedTimeInterval:recordingElapsedTimeInterval_
+                                 videoFilePath:[videoFileURL_ path]];
     
-}
-
-// Recording timer callback.
-- (void)recordingTimerCallback:(NSTimer *)timer
-{
-    // Call the delegate.
-    //[[self delegate] videoCamera:self recordingElapsedTimeInterval:CMTimeGetSeconds([captureMovieFileOutput_ recordedDuration])];
 }
 
 @end

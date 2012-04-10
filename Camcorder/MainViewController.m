@@ -205,14 +205,15 @@
 }
 
 // Notifies the delegate that the camcorder did stop recording.
-- (void)camcorderDidStopRecording:(Camcorder *)camcorder videoFilePath:(NSString *)videoFilePath
+- (void)camcorderDidStopRecording:(Camcorder *)camcorder recordingElapsedTimeInterval:(NSTimeInterval)recordingElapsedTimeInterval videoFilePath:(NSString *)videoFilePath;
 {
-    NSLog(@"Stopped recording %@!", videoFilePath);
+    NSLog(@"Stopped recording %f %@!", recordingElapsedTimeInterval, videoFilePath);
 }
 
 // Notifies the delegate of the recording elapsed time interval.
 - (void)camcorder:(Camcorder *)camcorder recordingElapsedTimeInterval:(NSTimeInterval)recordingElapsedTimeInterval
 {
+    NSLog(@"Recording %f!", recordingElapsedTimeInterval);
 }
 
 // Notifies the delegate that the camcorder failed with an error.
@@ -280,7 +281,7 @@
     if (![camcorder_ isRecording])
     {
         NSURL * outputDirectoryURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
-        [camcorder_ asynchronouslyStartRecordingToOutputDirectoryURL:outputDirectoryURL width:1920 height:1080 audio:YES timeInterval:0];        
+        [camcorder_ asynchronouslyStartRecordingToOutputDirectoryURL:outputDirectoryURL width:1920 height:1080 audio:NO timeInterval:3.5];        
     }
     else
     {
