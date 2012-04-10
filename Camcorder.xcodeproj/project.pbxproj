@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		D31732E215316348009065B8 /* AtomicFlag.m in Sources */ = {isa = PBXBuildFile; fileRef = D31732E115316348009065B8 /* AtomicFlag.m */; };
-		D32684AE153263F400FFA1A6 /* MovieWriter.m in Sources */ = {isa = PBXBuildFile; fileRef = D32684AD153263F400FFA1A6 /* MovieWriter.m */; };
 		D3F39B9D152F7CCC00592832 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D3F39B9C152F7CCC00592832 /* AVFoundation.framework */; };
 		D3F39BA0152F7CD400592832 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D3F39B9F152F7CD400592832 /* CoreMedia.framework */; };
 		D3F39BA2152F7CE100592832 /* AssetsLibrary.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D3F39BA1152F7CE100592832 /* AssetsLibrary.framework */; };
@@ -31,8 +30,6 @@
 /* Begin PBXFileReference section */
 		D31732E015316348009065B8 /* AtomicFlag.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AtomicFlag.h; sourceTree = "<group>"; };
 		D31732E115316348009065B8 /* AtomicFlag.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AtomicFlag.m; sourceTree = "<group>"; };
-		D32684AC153263F400FFA1A6 /* MovieWriter.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = MovieWriter.h; sourceTree = "<group>"; };
-		D32684AD153263F400FFA1A6 /* MovieWriter.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = MovieWriter.m; sourceTree = "<group>"; };
 		D3F39B9C152F7CCC00592832 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		D3F39B9F152F7CD400592832 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
 		D3F39BA1152F7CE100592832 /* AssetsLibrary.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AssetsLibrary.framework; path = System/Library/Frameworks/AssetsLibrary.framework; sourceTree = SDKROOT; };
@@ -130,8 +127,6 @@
 				D3F39BAF152F7D7E00592832 /* Camcorder.h */,
 				D3F39BB0152F7D7E00592832 /* Camcorder.m */,
 				D3F39BB2152F7DD800592832 /* CamcorderDelegate.h */,
-				D32684AC153263F400FFA1A6 /* MovieWriter.h */,
-				D32684AD153263F400FFA1A6 /* MovieWriter.m */,
 				D3FB086D152F781300BE32FD /* Supporting Files */,
 			);
 			path = Camcorder;
@@ -214,7 +209,6 @@
 				D3FB087A152F781300BE32FD /* MainViewController.m in Sources */,
 				D3F39BB1152F7D7E00592832 /* Camcorder.m in Sources */,
 				D31732E215316348009065B8 /* AtomicFlag.m in Sources */,
-				D32684AE153263F400FFA1A6 /* MovieWriter.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

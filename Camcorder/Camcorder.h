@@ -7,7 +7,6 @@
 //
 
 #import <UIKit/UIKit.h>
-#import "libkern/OSAtomic.h"
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
 #import "CamcorderDelegate.h"
@@ -18,35 +17,25 @@ static NSString * CamcorderErrorDomain = @"Camcorder";
 // Camcorder error code enumeration.
 enum CamcorderErrorCode
 {
-    CamcorderErrorNoStarted = 1000,
-    CamcorderErrorStartVideoOutput = 1001,
-    CamcorderErrorStartAudioOutput = 1002,
-
-    CamcorderErrorCodeNoVideoInput = 1010,
-    CamcorderErrorUnableToAddAssetWriterVideoInput = 1004,
-    CamcorderErrorUnableToStartAssetWriter = 1008
+    CamcorderErrorNotTurnedOn = 1000,
+    CamcorderErrorAlreadyRecording = 1001,
+    CamcorderErrorNotRecording = 1002,
+    CamcorderErrorRecording = 1003,
+    CamcorderErrorAddVideoInput = 1004,
+    CamcorderErrorAddAudioInput = 1005,
+    CamcorderErrorAddVideoOutput = 1006,
+    CamcorderErrorAddAudioOutput = 1007,
 };
 typedef enum CamcorderErrorCode CamcorderErrorCode;
-
-// The camera position enumeration.
-enum CameraPosition
-{
-    CameraPositionFront = 1,
-    CameraPositionBack = 2
-};
-typedef enum CameraPosition CameraPosition;
 
 // Camcorder interface.
 @interface Camcorder : NSObject
 
-// Class initializer.
-- (id)initWithOutputDirectoryURL:(NSURL *)outputDirectoryURL
-                           width:(NSUInteger)width
-                          height:(NSUInteger)height
-                    captureAudio:(BOOL)captureAudio;
-
 // Gets or sets the delegate.
-@property (nonatomic, assign) id <CamcorderDelegate> delegate;
+@property (atomic, assign) id <CamcorderDelegate> delegate;
+
+// Returns a AVCaptureVideoPreviewLayer for the camcorder.
+@property (nonatomic, readonly) AVCaptureVideoPreviewLayer * captureVideoPreviewLayer;
 
 // Gets a value indicating whether the camcorder is on.
 @property (nonatomic, readonly) BOOL isOn;
@@ -54,40 +43,28 @@ typedef enum CameraPosition CameraPosition;
 // Gets a value indicating whether the camcorder is recording.
 @property (nonatomic, readonly) BOOL isRecording;
 
-// Returns a AVCaptureVideoPreviewLayer for the camcorder.
-- (AVCaptureVideoPreviewLayer *)captureVideoPreviewLayer;
+// Asynchronously turns the camcorder on. If the camcorder is on, it is turned off then on.
+- (void)asynchronouslyTurnOnWithCaptureDevicePosition:(AVCaptureDevicePosition)captureDevicePosition
+                                            audio:(BOOL)audio;
 
-- (BOOL)start;
-
-// Sets the camera position.
-- (void)setCameraPosition:(CameraPosition)cameraPosition;
-
-// Turns the camcorder on.
-- (void)turnOn;
-
-// Turns the camcorder off.
-- (void)turnOff;
-
-// Starts the auto off timer.
-- (void)startAutoOffTimer;
-
-// Stops the auto off timer.
-- (void)stopAutoOffTimer;
-
-// Starts recording.
-- (void)startRecording;
-
-// Starts recording with an optional time interval.
-- (void)startRecordingWithTimeInterval:(NSTimeInterval *)timeInterval;
-
-// Stops recording.
-- (void)stopRecording;
+// Asynchronously turns the camcorder off.
+- (void)asynchronouslyTurnOff;
 
 // Performs an auto focus at the specified point. The focus mode will
-//automatically change to locked once the auto focus is complete.
+// automatically change to locked once the auto focus is complete.
 - (void)autoFocusAtPoint:(CGPoint)point;
 
 // Switch to continuous auto focus mode at the specified point
 - (void)continuousFocusAtPoint:(CGPoint)point;
+
+// Asynchronously starts recording.
+- (void)asynchronouslyStartRecordingToOutputDirectoryURL:(NSURL *)outputDirectoryURL
+                                                   width:(NSUInteger)width
+                                                  height:(NSUInteger)height
+                                                   audio:(BOOL)audio
+                                            timeInterval:(NSTimeInterval)timeInterval;
+
+// Asynchronously stops recording.
+- (void)asynchronouslyStopRecording;
 
 @end
