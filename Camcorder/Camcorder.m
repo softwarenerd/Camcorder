@@ -3,7 +3,7 @@
 //  Camcorder
 //
 //  Created by Brian Lambert on 4/6/12.
-//  Copyright (c) 2012 __MyCompanyName__. All rights reserved.
+//  Copyright (c) 2012 Brian Lambert. All rights reserved.
 //
 
 #import "libkern/OSAtomic.h"
@@ -178,7 +178,7 @@
     return [atomicFlagIsRecording_ isSet];
 }
 
-// Gets a value indicating whether the camcorder is recording.
+// Gets the recording elapsed time interval.
 - (NSTimeInterval)recordingElapsedTimeInterval
 {
     return recordingElapsedTimeInterval_;
@@ -321,7 +321,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     // Process sample buffer block.
     void (^processSampleBufferBlock)() = ^
     {
-        // Ignore samples after we stop recording.
+        // Ignore samples that arrive after we stop recording.
         if ([atomicFlagIsRecording_ isClear])
         {
             return;
@@ -343,8 +343,10 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         // If we're writing, write.
         if ([assetWriter_ status] == AVAssetWriterStatusWriting)
         {
+            // Process the audio or video sample.
             if (captureOutput == captureAudioDataOutput_)
             {
+                // If the asset writer input is ready for data, append it.
                 if ([assetWriterAudioInput_ isReadyForMoreMediaData])
                 {
                     [assetWriterAudioInput_ appendSampleBuffer:sampleBuffer];
@@ -352,12 +354,13 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
             }
             else if (captureOutput == captureVideoDataOutput_)
             {
+                // If the asset writer input is ready for data, append it.
                 if ([assetWriterVideoInput_ isReadyForMoreMediaData])
                 {
                     [assetWriterVideoInput_ appendSampleBuffer:sampleBuffer];
                 }
                 
-                // End timed recording.
+                // End timed recording. We use video samples to determine this.
                 if (recordingTimeInterval_ != 0.0 && elapsedTimeInterval >= recordingTimeInterval_)
                 {
                     elapsedTimeInterval = recordingTimeInterval_;
@@ -610,35 +613,36 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         return;
     }
     
-#if false
-    #define M_PI        3.14159265358979323846264338327950288   /* pi */
-    #define M_PI_2      1.57079632679489661923132169163975144   /* pi/2 */
-    #define M_PI_4      0.785398163397448309615660845819875721  /* pi/4 */
-    #define M_1_PI      0.318309886183790671537767526745028724  /* 1/pi */
-    #define M_2_PI      0.636619772367581343075535053490057448  /* 2/pi */
-    #define M_2_SQRTPI  1.12837916709551257389615890312154517   /* 2/sqrt(pi) */
-#endif
-    
+    // Set-up the transform for the asset writer.
     UIDeviceOrientation deviceOrientation = [[UIDevice currentDevice] orientation];
-    
     AVCaptureDevicePosition captureDevicePosition = [[captureDeviceInputVideo_ device] position];
-    
     CGAffineTransform affineTransform = CGAffineTransformMakeRotation(0.0);
     if (captureDevicePosition == AVCaptureDevicePositionBack)
     {
-        if ([[UIDevice currentDevice] orientation] == UIDeviceOrientationLandscapeRight)
+        if (deviceOrientation == UIDeviceOrientationLandscapeRight)
         {
             affineTransform = CGAffineTransformMakeRotation(M_PI);            
         }
     }
     else if (captureDevicePosition == AVCaptureDevicePositionFront)
     {
-        affineTransform = CGAffineTransformMakeRotation(180 * M_PI / 180); 
+        if (deviceOrientation == UIDeviceOrientationLandscapeLeft)
+        {
+            affineTransform = CGAffineTransformMakeRotation(M_PI);             
+        }
     }
+    
+    // Experimental.
+    float bitsPerPixel;
+	int pixelsPerFrame = width * height;
+	int bitsPerSecond;
+	bitsPerPixel = 0.5; // 11.4
+	bitsPerSecond = pixelsPerFrame * bitsPerPixel;
         
     // Create the compression properties.
     NSDictionary * compressionProperties = [NSDictionary dictionaryWithObjectsAndKeys:
                                             [NSNumber numberWithInteger:30], AVVideoMaxKeyFrameIntervalKey,
+                                            //[NSNumber numberWithInteger:bitsPerSecond], AVVideoAverageBitRateKey,
                                             nil];
     
     // Create the output settings.

@@ -3,7 +3,7 @@
 //  Camcorder
 //
 //  Created by Brian Lambert on 4/6/12.
-//  Copyright (c) 2012 __MyCompanyName__. All rights reserved.
+//  Copyright (c) 2012 Brian Lambert. All rights reserved.
 //
 
 #import <UIKit/UIKit.h>
@@ -49,7 +49,7 @@ typedef enum CamcorderErrorCode CamcorderErrorCode;
 // Gets a value indicating whether the camcorder is recording.
 @property (nonatomic, readonly) BOOL isRecording;
 
-// Gets a value indicating whether the camcorder is recording.
+// Gets the recording elapsed time interval.
 @property (nonatomic, readonly) NSTimeInterval recordingElapsedTimeInterval;
 
 // Asynchronously turns the camcorder on. If the camcorder is on, it is turned off then on.
