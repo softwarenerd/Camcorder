@@ -25,16 +25,6 @@
 // Camcorder (Internal) interface.
 @interface Camcorder (Internal)
 
-// Returns an AVCaptureConnection* matching the specified media type from the specified array of connections.
-+ (AVCaptureConnection *)connectionWithMediaType:(NSString *)mediaType fromConnections:(NSArray *)connections;
-
-// Returns the camera with the specificed AVCaptureDevicePosition. If a camera with the specificed
-// AVCaptureDevicePosition cannot be found, returns nil.
-- (AVCaptureDevice *)cameraWithPosition:(AVCaptureDevicePosition)position;
-
-// Returns the first audio device, if it was found; otherwise, nil.
-- (AVCaptureDevice *)audioDevice;
-
 // Turns the camcorder on.
 - (void)turnOnWithCaptureDevicePosition:(AVCaptureDevicePosition)captureDevicePosition
                                   audio:(BOOL)audio;
@@ -112,14 +102,15 @@
     // The video file URL.
     NSURL * videoFileURL_;
 
-    // The recording time interval. A value of 0.0 means untimed.
+    // The recording time interval. A value of 0.0 means a recording will stop
+    // when stop.
     NSTimeInterval recordingTimeInterval_;
 
     // The recording start time.
-    CMTime assetWriterStartTime_;
+    volatile CMTime assetWriterStartTime_;
     
     // The elapsed time interval.
-    NSTimeInterval recordingElapsedTimeInterval_;
+    volatile NSTimeInterval recordingElapsedTimeInterval_;
 }
 
 // Class initializer.
@@ -194,7 +185,7 @@
 }
 
 // Asynchronously turns the camcorder on. If the camcorder is on, it is turned off then on.
-- (void)asynchronouslyTurnOnWithCaptureDevicePosition:(AVCaptureDevicePosition)captureDevicePosition
+- (void)asyncTurnOnWithCaptureDevicePosition:(AVCaptureDevicePosition)captureDevicePosition
                                                 audio:(BOOL)audio
 {
     // Turn camcorder on block.
@@ -212,7 +203,7 @@
 }
 
 // Asynchronously turns the camcorder off.
-- (void)asynchronouslyTurnOff
+- (void)asyncTurnOff
 {
     // Turn camcorder off block.
     void (^turnCamcorderOffBlock)() = ^
@@ -252,15 +243,15 @@
 // Switch to continuous auto focus mode at the specified point
 - (void)continuousFocusAtPoint:(CGPoint)point
 {
-    AVCaptureDevice * device = [captureDeviceInputVideo_ device];
-    if ([device isFocusPointOfInterestSupported] && [device isFocusModeSupported:AVCaptureFocusModeContinuousAutoFocus])
+    AVCaptureDevice * captureDevice = [captureDeviceInputVideo_ device];
+    if ([captureDevice isFocusPointOfInterestSupported] && [captureDevice isFocusModeSupported:AVCaptureFocusModeContinuousAutoFocus])
     {
 		NSError * error;
-		if ([device lockForConfiguration:&error])
+		if ([captureDevice lockForConfiguration:&error])
         {
-			[device setFocusPointOfInterest:point];
-			[device setFocusMode:AVCaptureFocusModeContinuousAutoFocus];
-			[device unlockForConfiguration];
+			[captureDevice setFocusPointOfInterest:point];
+			[captureDevice setFocusMode:AVCaptureFocusModeContinuousAutoFocus];
+			[captureDevice unlockForConfiguration];
 		}
         else
         {
@@ -270,7 +261,7 @@
 }
 
 // Starts recording with an optional time interval.
-- (void)asynchronouslyStartRecordingToOutputDirectoryURL:(NSURL *)outputDirectoryURL
+- (void)asyncStartRecordingToOutputDirectoryURL:(NSURL *)outputDirectoryURL
                                                    width:(NSUInteger)width
                                                   height:(NSUInteger)height
                                                    audio:(BOOL)audio
@@ -295,7 +286,7 @@
 }
 
 // Stops recording.
-- (void)asynchronouslyStopRecording
+- (void)asyncStopRecording
 {
     // Start recording block.
     void (^startRecordingBlock)() = ^
@@ -394,67 +385,42 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 // Camcorder (Internal) implementation.
 @implementation Camcorder (Internal)
 
-// Returns an AVCaptureConnection* matching the specified media type from the specified array of connections.
-+ (AVCaptureConnection *)connectionWithMediaType:(NSString *)mediaType fromConnections:(NSArray *)connections
-{
-    for (AVCaptureConnection * connection in connections)
-    {
-        for (AVCaptureInputPort * port in [connection inputPorts])
-        {
-            if ([[port mediaType] isEqual:mediaType])
-            {
-                return connection;
-            }
-        }
-    }
-    
-    return nil;
-}
-
-// Returns the first camera with the specificed AVCaptureDevicePosition.
-- (AVCaptureDevice *)cameraWithPosition:(AVCaptureDevicePosition)position
-{
-    NSArray * devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
-    for (AVCaptureDevice * device in devices)
-    {
-        if ([device position] == position)
-        {
-            return device;
-        }
-    }
-    
-    return nil;
-}
-
-// Returns the first audio device.
-- (AVCaptureDevice *)audioDevice
-{
-    NSArray * devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeAudio];
-    if ([devices count] > 0)
-    {
-        return [devices objectAtIndex:0];
-    }
-    
-    return nil;
-}
-
 // Turns the camcorder on. If the camcorder is on, it is turned off then on.
 - (void)turnOnWithCaptureDevicePosition:(AVCaptureDevicePosition)captureDevicePosition
                                   audio:(BOOL)audio
 {
     // Turn off.
     [self turnOff];
+
+    // Find the first video capture device with the specified positon.
+    AVCaptureDevice * captureDevice = nil;
+    for (AVCaptureDevice * captureDeviceCheck in [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo])
+    {
+        if ([captureDeviceCheck position] == captureDevicePosition)
+        {
+            captureDevice =  captureDeviceCheck;
+            break;
+        }
+    }
     
-    // Allocate the video capture device input.
+    // If a video capture device with the specified positon could not be found, we're done.
+    if (captureDevice == nil)
+    {
+        NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorVideoDeviceNotFound userInfo:nil];
+        [[self delegate] camcorder:self didFailWithError:error];
+        return;
+    }
+    
+    // Allocate the video capture device input for the video capture device.
     NSError * error;
-    AVCaptureDeviceInput * captureDeviceInputVideo = [[AVCaptureDeviceInput alloc] initWithDevice:[self cameraWithPosition:captureDevicePosition] error:&error];
+    AVCaptureDeviceInput * captureDeviceInputVideo = [[AVCaptureDeviceInput alloc] initWithDevice:captureDevice error:&error];
     if (error)
     {
         [[self delegate] camcorder:self didFailWithError:error];
         return;
     }
     
-    // See if we can add the video capture device input.
+    // See if we can add the video capture device input to the capture session.
     if (![captureSession_ canAddInput:captureDeviceInputVideo])
     {
         NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorAddVideoInput userInfo:nil];
@@ -462,7 +428,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         return;
     }
     
-    // Allocate the audio capture device input.
+    // Handle audiop, if we should.
     AVCaptureDeviceInput * captureDeviceInputAudio;
     if (!audio)
     {
@@ -470,14 +436,27 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     }
     else
     {
+        // Get the default audio capture device.
+        AVCaptureDevice * audioDevice = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeAudio];
+        
+        // If an audio capture device could not be found, we're done.
+        if (audioDevice == nil)
+        {
+            NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorAudioDeviceNotFound userInfo:nil];
+            [[self delegate] camcorder:self didFailWithError:error];
+            return;
+        }
+        
+        // Allocate the audio capture device input for the audio capture device.
         NSError * error;
-        captureDeviceInputAudio = [[AVCaptureDeviceInput alloc] initWithDevice:[self audioDevice] error:&error];
+        captureDeviceInputAudio = [[AVCaptureDeviceInput alloc] initWithDevice:audioDevice error:&error];
         if (error)
         {
             [[self delegate] camcorder:self didFailWithError:error];
             return;
         }
         
+        // See if we can add the audio capture device input to the capture session.
         if (![captureSession_ canAddInput:captureDeviceInputAudio])
         {
             NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorAddAudioInput userInfo:nil];
@@ -490,7 +469,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     AVCaptureVideoDataOutput * captureVideoDataOutput = [[AVCaptureVideoDataOutput alloc] init];
     [captureVideoDataOutput setAlwaysDiscardsLateVideoFrames:NO];
     [captureVideoDataOutput setSampleBufferDelegate:self queue:captureOutputQueue_];
-    
+        
     // If we can't add the video output, report the failure 
     if (![captureSession_ canAddOutput:captureVideoDataOutput])
     {
@@ -510,7 +489,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         captureAudioDataOutput = [[AVCaptureAudioDataOutput alloc] init];
         [captureAudioDataOutput setSampleBufferDelegate:self queue:captureOutputQueue_];
         
-        // If we can't add the audio output, report the failure 
         if (![captureSession_ canAddOutput:captureAudioDataOutput])
         {
             NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorAddAudioOutput userInfo:nil];
@@ -612,7 +590,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         [[self delegate] camcorder:self didFailWithError:error];
         return;
     }
-    
+       
     // Set-up the date formatter string used to construct the video file name.
     NSDateFormatter * dateFormat = [[NSDateFormatter alloc] init];
     [dateFormat setDateFormat:@"yyyy-MM-dd-HH:mm:ss:SS"];
@@ -632,22 +610,32 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         return;
     }
     
-    // Adjust for orientation.
-    UIDeviceOrientation deviceOrientation = [[UIDevice currentDevice] orientation];
-    CGAffineTransform affineTransform;
-    if (UIDeviceOrientationIsPortrait(deviceOrientation))
-    {
-        affineTransform = CGAffineTransformMakeRotation(0.0);
-    }
-    else if (deviceOrientation == UIDeviceOrientationLandscapeLeft)
-    {
-        affineTransform = CGAffineTransformMakeRotation(0.0);
-    }
-    else if (deviceOrientation == UIDeviceOrientationLandscapeRight)
-    {
-        affineTransform = CGAffineTransformMakeRotation(M_PI);
-    }
+#if false
+    #define M_PI        3.14159265358979323846264338327950288   /* pi */
+    #define M_PI_2      1.57079632679489661923132169163975144   /* pi/2 */
+    #define M_PI_4      0.785398163397448309615660845819875721  /* pi/4 */
+    #define M_1_PI      0.318309886183790671537767526745028724  /* 1/pi */
+    #define M_2_PI      0.636619772367581343075535053490057448  /* 2/pi */
+    #define M_2_SQRTPI  1.12837916709551257389615890312154517   /* 2/sqrt(pi) */
+#endif
     
+    UIDeviceOrientation deviceOrientation = [[UIDevice currentDevice] orientation];
+    
+    AVCaptureDevicePosition captureDevicePosition = [[captureDeviceInputVideo_ device] position];
+    
+    CGAffineTransform affineTransform = CGAffineTransformMakeRotation(0.0);
+    if (captureDevicePosition == AVCaptureDevicePositionBack)
+    {
+        if ([[UIDevice currentDevice] orientation] == UIDeviceOrientationLandscapeRight)
+        {
+            affineTransform = CGAffineTransformMakeRotation(M_PI);            
+        }
+    }
+    else if (captureDevicePosition == AVCaptureDevicePositionFront)
+    {
+        affineTransform = CGAffineTransformMakeRotation(180 * M_PI / 180); 
+    }
+        
     // Create the compression properties.
     NSDictionary * compressionProperties = [NSDictionary dictionaryWithObjectsAndKeys:
                                             [NSNumber numberWithInteger:30], AVVideoMaxKeyFrameIntervalKey,
@@ -664,7 +652,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     // See if the asset writer can apply the output settings.
 	if (![assetWriter canApplyOutputSettings:outputSettings forMediaType:AVMediaTypeVideo])
     {
-        NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorRecording userInfo:nil];
+        NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorOutputVideoSettingsInvalid userInfo:nil];
         [[self delegate] camcorder:self didFailWithError:error];
         return;
     }
@@ -675,7 +663,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     [assetWriterVideoInput setExpectsMediaDataInRealTime:YES];    
     if (![assetWriter canAddInput:assetWriterVideoInput])
     {
-        NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorRecording userInfo:nil];
+        NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorOutputVideoInitializationFailed userInfo:nil];
         [[self delegate] camcorder:self didFailWithError:error];
         return;
     }
@@ -700,7 +688,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         // See if the asset writer can apply the output settings.
         if (![assetWriter canApplyOutputSettings:outputSettings forMediaType:AVMediaTypeAudio])
         {
-            NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorRecording userInfo:nil];
+            NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorOutputAudioSettingsInvalid userInfo:nil];
             [[self delegate] camcorder:self didFailWithError:error];
             return;
         }
@@ -710,7 +698,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         [assetWriterAudioInput setExpectsMediaDataInRealTime:YES];
         if (![assetWriter canAddInput:assetWriterAudioInput])
         {
-            NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorRecording userInfo:nil];
+            NSError * error = [NSError errorWithDomain:CamcorderErrorDomain code:CamcorderErrorOutputAudioInitializationFailed userInfo:nil];
             [[self delegate] camcorder:self didFailWithError:error];
             return;
         }

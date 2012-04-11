@@ -1,9 +1,8 @@
 //
 //  AtomicFlag.h
-//  SoberToday
 //
 //  Created by Brian Lambert on 3/21/12.
-//  Copyright (c) 2012 IQ320. All rights reserved.
+//  Copyright (c) 2012 Brian Lambert. All rights reserved.
 //
 
 #import <UIKit/UIKit.h>

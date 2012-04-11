@@ -266,13 +266,13 @@
 // buttonTurnOnFrontCameraTouchUpInside action.
 - (void)buttonTurnOnFrontCameraTouchUpInside:(UIButton *)sender
 {
-    [camcorder_ asynchronouslyTurnOnWithCaptureDevicePosition:AVCaptureDevicePositionFront audio:YES];
+    [camcorder_ asyncTurnOnWithCaptureDevicePosition:AVCaptureDevicePositionFront audio:YES];
 }
 
 // buttonTurnOnBackCameraTouchUpInside action.
 - (void)buttonTurnOnBackCameraTouchUpInside:(UIButton *)sender
 {
-    [camcorder_ asynchronouslyTurnOnWithCaptureDevicePosition:AVCaptureDevicePositionBack audio:YES];
+    [camcorder_ asyncTurnOnWithCaptureDevicePosition:AVCaptureDevicePositionBack audio:YES];
 }
 
 // buttonRecordTouchUpInside action.
@@ -281,18 +281,18 @@
     if (![camcorder_ isRecording])
     {
         NSURL * outputDirectoryURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
-        [camcorder_ asynchronouslyStartRecordingToOutputDirectoryURL:outputDirectoryURL width:1920 height:1080 audio:NO timeInterval:3.5];        
+        [camcorder_ asyncStartRecordingToOutputDirectoryURL:outputDirectoryURL width:1920 height:1080 audio:NO timeInterval:3.5];        
     }
     else
     {
-        [camcorder_ asynchronouslyStopRecording];
+        [camcorder_ asyncStopRecording];
     }
 }
 
 // buttonTurnOffTouchUpInside action.
 - (void)buttonTurnOffTouchUpInside:(UIButton *)sender
 {
-    [camcorder_ asynchronouslyTurnOff];
+    [camcorder_ asyncTurnOff];
 }
 
 

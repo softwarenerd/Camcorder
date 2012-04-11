@@ -18,13 +18,19 @@ static NSString * CamcorderErrorDomain = @"Camcorder";
 enum CamcorderErrorCode
 {
     CamcorderErrorNotTurnedOn = 1000,
-    CamcorderErrorAlreadyRecording = 1001,
-    CamcorderErrorNotRecording = 1002,
-    CamcorderErrorRecording = 1003,
-    CamcorderErrorAddVideoInput = 1004,
-    CamcorderErrorAddAudioInput = 1005,
-    CamcorderErrorAddVideoOutput = 1006,
-    CamcorderErrorAddAudioOutput = 1007,
+    CamcorderErrorAudioDeviceNotFound = 1001,
+    CamcorderErrorVideoDeviceNotFound = 1002,
+    CamcorderErrorAlreadyRecording = 1003,
+    CamcorderErrorNotRecording = 1004,
+    CamcorderErrorOutputVideoSettingsInvalid = 1005,
+    CamcorderErrorOutputVideoInitializationFailed = 1006,
+    CamcorderErrorOutputAudioSettingsInvalid = 1007,
+    CamcorderErrorOutputAudioInitializationFailed = 1008,
+    CamcorderErrorRecording = 1009,
+    CamcorderErrorAddVideoInput = 1010,
+    CamcorderErrorAddAudioInput = 1011,
+    CamcorderErrorAddVideoOutput = 1012,
+    CamcorderErrorAddAudioOutput = 1013
 };
 typedef enum CamcorderErrorCode CamcorderErrorCode;
 
@@ -47,11 +53,11 @@ typedef enum CamcorderErrorCode CamcorderErrorCode;
 @property (nonatomic, readonly) NSTimeInterval recordingElapsedTimeInterval;
 
 // Asynchronously turns the camcorder on. If the camcorder is on, it is turned off then on.
-- (void)asynchronouslyTurnOnWithCaptureDevicePosition:(AVCaptureDevicePosition)captureDevicePosition
-                                            audio:(BOOL)audio;
+- (void)asyncTurnOnWithCaptureDevicePosition:(AVCaptureDevicePosition)captureDevicePosition
+                                       audio:(BOOL)audio;
 
 // Asynchronously turns the camcorder off.
-- (void)asynchronouslyTurnOff;
+- (void)asyncTurnOff;
 
 // Performs an auto focus at the specified point. The focus mode will
 // automatically change to locked once the auto focus is complete.
@@ -61,13 +67,13 @@ typedef enum CamcorderErrorCode CamcorderErrorCode;
 - (void)continuousFocusAtPoint:(CGPoint)point;
 
 // Asynchronously starts recording.
-- (void)asynchronouslyStartRecordingToOutputDirectoryURL:(NSURL *)outputDirectoryURL
-                                                   width:(NSUInteger)width
-                                                  height:(NSUInteger)height
-                                                   audio:(BOOL)audio
-                                            timeInterval:(NSTimeInterval)timeInterval;
+- (void)asyncStartRecordingToOutputDirectoryURL:(NSURL *)outputDirectoryURL
+                                          width:(NSUInteger)width
+                                         height:(NSUInteger)height
+                                          audio:(BOOL)audio
+                                   timeInterval:(NSTimeInterval)timeInterval;
 
 // Asynchronously stops recording.
-- (void)asynchronouslyStopRecording;
+- (void)asyncStopRecording;
 
 @end
